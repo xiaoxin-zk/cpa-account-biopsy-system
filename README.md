@@ -127,6 +127,14 @@ sidecar 重启后，在本轮探测尚未执行前，会明确显示“未探测
 curl http://127.0.0.1:18317/healthz
 ```
 
+#### 4. 首次访问为什么要求设置密码？
+
+因为安装命令默认不再要求你把 Web 密码写在命令行里。首次打开页面时会进入初始化流程，在浏览器中设置仪表台密码，之后会自动持久化保存。
+
+#### 5. 为什么修改密码后会被强制退出？
+
+这是预期的安全行为。只要 Web 管理密码被修改，当前登录态会立即失效，系统会强制退出并要求你使用新密码重新登录；旧密码和旧登录态会同时失效。
+
 ### 安全说明
 
 - 不要把真实账号文件、Token、管理密钥提交到公开仓库
@@ -259,6 +267,14 @@ Because the sidecar intentionally avoids treating historical states as current r
 curl http://127.0.0.1:18317/healthz
 ```
 
+#### Why do I need to set a password on first visit?
+
+Because the simplified installer no longer forces you to pass a dashboard password in the command line. The first visit opens a Web initialization flow where you create the dashboard password, and the system persists it automatically.
+
+#### Why am I forced to log in again after changing the password?
+
+This is expected security behavior. Once the Web management password is changed, the current login session is invalidated immediately, the dashboard forces a logout, and you must sign in again with the new password. The old password and the old logged-in state both become invalid right away.
+
 ### Security Notes
 
 - Do not commit real auth files, tokens, or management keys
@@ -269,10 +285,3 @@ curl http://127.0.0.1:18317/healthz
 
 Developer: Xiaoxin  
 Version: 0.1-bate
-#### 4. 首次访问为什么要求设置密码？
-
-因为安装命令默认不再要求你把 Web 密码写在命令行里。首次打开页面时会进入初始化流程，在浏览器中设置仪表台密码，之后会自动持久化保存。
-
-#### Why do I need to set a password on first visit?
-
-Because the simplified installer no longer forces you to pass a dashboard password in the command line. The first visit opens a Web initialization flow where you create the dashboard password, and the system persists it automatically.
