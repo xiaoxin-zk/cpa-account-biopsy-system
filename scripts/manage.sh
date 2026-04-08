@@ -21,6 +21,41 @@ run_cmd() {
   "$@"
 }
 
+format_access_addrs() {
+  local listen_addr="$1"
+  local port="${listen_addr#:}"
+  if [ -z "$port" ] || [ "$port" = "$listen_addr" ]; then
+    port="18317"
+  fi
+  local localhost="http://127.0.0.1:${port}"
+  local lan_ip=""
+  local public_ip=""
+
+  if has_cmd ip; then
+    lan_ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -n 1)"
+  fi
+  if [ -z "$lan_ip" ] && has_cmd hostname; then
+    lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}' | head -n 1)"
+  fi
+  if [ -z "$lan_ip" ] && has_cmd ifconfig; then
+    lan_ip="$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
+  fi
+
+  if [ "$TEST_MODE" = "1" ]; then
+    public_ip="203.0.113.10"
+  elif has_cmd curl; then
+    public_ip="$(curl -fsSL --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  fi
+
+  printf '本机访问地址: %s' "$localhost"
+  if [ -n "$lan_ip" ] && [ "$lan_ip" != "127.0.0.1" ]; then
+    printf '\n[%s] 局域网访问地址: http://%s:%s' "$APP_NAME" "$lan_ip" "$port"
+  fi
+  if [ -n "$public_ip" ]; then
+    printf '\n[%s] 公网访问地址: http://%s:%s' "$APP_NAME" "$public_ip" "$port"
+  fi
+}
+
 ensure_env_file() {
   mkdir -p "$INSTALL_DIR"
   if [ ! -f "$ENV_FILE" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
@@ -149,7 +184,7 @@ install_or_update() {
   run_cmd docker compose --env-file "$ENV_FILE" up -d --build
   local listen_addr="${CPA_LISTEN_ADDR:-:18317}"
   log "完成"
-  log "访问地址: http://SERVER_IP${listen_addr#:}"
+  log "$(format_access_addrs "$listen_addr")"
   log "首次访问将进入 Web 初始化页面设置仪表台密码"
 }
 
@@ -168,7 +203,7 @@ show_status() {
   load_existing_env
   log "当前状态: 已安装"
   log "安装目录: $INSTALL_DIR"
-  log "访问地址: http://SERVER_IP${CPA_LISTEN_ADDR#:}"
+  log "$(format_access_addrs "${CPA_LISTEN_ADDR:-:18317}")"
   if has_cmd docker; then
     (cd "$INSTALL_DIR" && docker compose --env-file "$ENV_FILE" ps) || true
   else
