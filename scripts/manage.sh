@@ -121,7 +121,7 @@ detect_container_name() {
   if ! has_cmd docker; then
     return 0
   fi
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -E 'cliproxyapi|cli-proxy-api' | head -n 1 || true
+  docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null | grep -Ei 'cliproxyapi|cli-proxy-api' | awk '{print $1}' | head -n 1 || true
 }
 
 detect_from_container() {
@@ -167,7 +167,7 @@ count_auth_files() {
 
 run_post_install_checks() {
   validate_host_inputs
-  local auth_count listen_addr port sidecar_url sidecar_code mgmt_code
+  local auth_count listen_addr port sidecar_url sidecar_code mgmt_code bootstrap_json bootstrap_auth_count bootstrap_error
   auth_count="$(count_auth_files "$CPA_AUTH_DIR")"
   log "自检: auths 目录 $CPA_AUTH_DIR，检测到 $auth_count 个账号文件"
   log "自检: config.yaml 路径 $CPA_CONFIG_PATH"
@@ -188,6 +188,17 @@ run_post_install_checks() {
     sidecar_code="$(http_get_code "$sidecar_url")" || sidecar_code="000"
     [ "$sidecar_code" = "200" ] || die "sidecar 健康检查失败: $sidecar_url 返回 $sidecar_code"
     log "自检: sidecar 健康检查通过 -> $sidecar_url"
+
+    bootstrap_json="$(curl -fsSL --max-time 5 "http://127.0.0.1:${port}/api/bootstrap-state" 2>/dev/null || true)"
+    bootstrap_auth_count="$(printf '%s' "$bootstrap_json" | sed -n 's/.*"auth_count":\([0-9]\+\).*/\1/p' | head -n 1)"
+    bootstrap_error="$(printf '%s' "$bootstrap_json" | sed -n 's/.*"last_error":"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [ -n "$bootstrap_error" ]; then
+      log "自检: sidecar 已启动，但后端状态异常 -> $bootstrap_error"
+    elif [ -n "$bootstrap_auth_count" ] && [ "$bootstrap_auth_count" -gt 0 ] 2>/dev/null; then
+      log "自检: sidecar 已连接主项目，当前已读取 $bootstrap_auth_count 个账号"
+    else
+      log "自检: sidecar 已启动，但当前未读取到账号信息"
+    fi
   fi
 }
 
@@ -251,6 +262,7 @@ show_status() {
     return 0
   fi
   load_existing_env
+  validate_host_inputs
   log "当前状态: 已安装"
   log "安装目录: $INSTALL_DIR"
   log "$(format_access_addrs "${CPA_LISTEN_ADDR:-:18317}")"
@@ -259,6 +271,7 @@ show_status() {
   else
     log "docker 命令不可用，无法显示容器状态"
   fi
+  run_post_install_checks
 }
 
 uninstall_service() {
