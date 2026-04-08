@@ -128,6 +128,7 @@ detect_from_container() {
   local name="$1"
   [ -n "$name" ] || return 0
   local inspect envs binds
+  log "已发现主项目容器: $name"
   inspect="$(docker inspect "$name" --format '{{range .Mounts}}{{println .Destination "=" .Source}}{{end}}' 2>/dev/null || true)"
   envs="$(docker inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true)"
   binds="$(docker inspect "$name" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}' 2>/dev/null || true)"
@@ -153,6 +154,94 @@ detect_from_container() {
       [ -n "$detected_port" ] && CPA_MANAGEMENT_URL="http://127.0.0.1:${detected_port}"
     fi
   fi
+
+  detect_from_mount_directories "$inspect"
+  detect_from_bind_directories "$binds"
+}
+
+scan_candidate_root() {
+  local root="$1"
+  [ -n "$root" ] || return 0
+  [ -d "$root" ] || return 0
+  log "正在从挂载目录尝试识别配置: $root"
+
+  local config_candidates=(
+    "$root/config.yaml"
+    "$root/config/config.yaml"
+    "$root/data/config.yaml"
+    "$root/CLIProxyAPI/config.yaml"
+  )
+  local auth_candidates=(
+    "$root/auths"
+    "$root/.cli-proxy-api"
+    "$root/data/auths"
+    "$root/CLIProxyAPI/auths"
+  )
+
+  if [ -z "${CPA_CONFIG_PATH:-}" ]; then
+    for candidate in "${config_candidates[@]}"; do
+      if [ -f "$candidate" ]; then
+        CPA_CONFIG_PATH="$candidate"
+        log "自动识别到配置文件: $CPA_CONFIG_PATH"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "${CPA_AUTH_DIR:-}" ]; then
+    for candidate in "${auth_candidates[@]}"; do
+      if [ -d "$candidate" ]; then
+        CPA_AUTH_DIR="$candidate"
+        log "自动识别到账号目录: $CPA_AUTH_DIR"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "${CPA_CONFIG_PATH:-}" ] || [ -z "${CPA_AUTH_DIR:-}" ]; then
+    local best_root=""
+    for candidate_root in "$root" "$root/config" "$root/data" "$root/CLIProxyAPI"; do
+      if [ -d "$candidate_root" ] && [ -f "$candidate_root/config.yaml" ] && { [ -d "$candidate_root/auths" ] || [ -d "$candidate_root/.cli-proxy-api" ]; }; then
+        best_root="$candidate_root"
+        break
+      fi
+    done
+    if [ -n "$best_root" ]; then
+      [ -z "${CPA_CONFIG_PATH:-}" ] && [ -f "$best_root/config.yaml" ] && CPA_CONFIG_PATH="$best_root/config.yaml"
+      if [ -z "${CPA_AUTH_DIR:-}" ]; then
+        [ -d "$best_root/auths" ] && CPA_AUTH_DIR="$best_root/auths"
+        [ -z "${CPA_AUTH_DIR:-}" ] && [ -d "$best_root/.cli-proxy-api" ] && CPA_AUTH_DIR="$best_root/.cli-proxy-api"
+      fi
+      [ -n "${CPA_CONFIG_PATH:-}" ] && log "目录结构匹配到配置文件: $CPA_CONFIG_PATH"
+      [ -n "${CPA_AUTH_DIR:-}" ] && log "目录结构匹配到账号目录: $CPA_AUTH_DIR"
+    fi
+  fi
+}
+
+detect_from_mount_directories() {
+  local inspect="$1"
+  [ -n "$inspect" ] || return 0
+  while IFS= read -r line; do
+    local src
+    src="$(printf '%s' "$line" | awk -F' = ' '{print $2}')"
+    [ -n "$src" ] || continue
+    if [ -d "$src" ]; then
+      scan_candidate_root "$src"
+    fi
+  done <<< "$inspect"
+}
+
+detect_from_bind_directories() {
+  local binds="$1"
+  [ -n "$binds" ] || return 0
+  while IFS= read -r line; do
+    local src
+    src="$(printf '%s' "$line" | awk -F: '{print $1}')"
+    [ -n "$src" ] || continue
+    if [ -d "$src" ]; then
+      scan_candidate_root "$src"
+    fi
+  done <<< "$binds"
 }
 
 detect_from_compose_files() {
