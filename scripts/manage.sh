@@ -121,23 +121,37 @@ detect_container_name() {
   if ! has_cmd docker; then
     return 0
   fi
-  docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null | grep -Ei 'cliproxyapi|cli-proxy-api' | awk '{print $1}' | head -n 1 || true
+  docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null | grep -Ei 'cli-proxy-api|cliproxyapi' | awk '{print $1}' | head -n 1 || true
 }
 
 detect_from_container() {
   local name="$1"
   [ -n "$name" ] || return 0
-  local inspect envs
+  local inspect envs binds
   inspect="$(docker inspect "$name" --format '{{range .Mounts}}{{println .Destination "=" .Source}}{{end}}' 2>/dev/null || true)"
   envs="$(docker inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true)"
+  binds="$(docker inspect "$name" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}' 2>/dev/null || true)"
   if [ -z "${CPA_AUTH_DIR:-}" ]; then
     CPA_AUTH_DIR="$(printf '%s' "$inspect" | awk -F' = ' '$1=="/root/.cli-proxy-api"{print $2}' | head -n 1)"
+  fi
+  if [ -z "${CPA_AUTH_DIR:-}" ]; then
+    CPA_AUTH_DIR="$(printf '%s' "$binds" | awk -F: '/\.cli-proxy-api/ {print $1}' | head -n 1)"
   fi
   if [ -z "${CPA_CONFIG_PATH:-}" ]; then
     CPA_CONFIG_PATH="$(printf '%s' "$inspect" | awk -F' = ' '$2 ~ /config.yaml$/{print $2}' | head -n 1)"
   fi
+  if [ -z "${CPA_CONFIG_PATH:-}" ]; then
+    CPA_CONFIG_PATH="$(printf '%s' "$binds" | awk -F: '/config.yaml/ {print $1}' | head -n 1)"
+  fi
   if [ -z "${CPA_MANAGEMENT_KEY:-}" ]; then
     CPA_MANAGEMENT_KEY="$(printf '%s' "$envs" | awk -F= '$1=="MANAGEMENT_PASSWORD"{print substr($0,index($0,"=")+1)}' | head -n 1)"
+  fi
+  if [ -z "${CPA_MANAGEMENT_URL:-}" ]; then
+    if printf '%s' "$envs" | grep -q '^PORT='; then
+      local detected_port
+      detected_port="$(printf '%s' "$envs" | awk -F= '$1=="PORT"{print $2}' | head -n 1)"
+      [ -n "$detected_port" ] && CPA_MANAGEMENT_URL="http://127.0.0.1:${detected_port}"
+    fi
   fi
 }
 
@@ -234,8 +248,12 @@ prepare_config() {
   local container_name
   container_name="$(detect_container_name)"
   detect_from_container "$container_name"
-  detect_from_compose_files
-  detect_common_paths
+  if [ -z "${CPA_AUTH_DIR:-}" ] || [ -z "${CPA_CONFIG_PATH:-}" ] || [ -z "${CPA_MANAGEMENT_KEY:-}" ]; then
+    detect_from_compose_files
+  fi
+  if [ -z "${CPA_AUTH_DIR:-}" ] || [ -z "${CPA_CONFIG_PATH:-}" ]; then
+    detect_common_paths
+  fi
 
   if [ -n "${CPA_AUTH_DIR:-}" ] && [ ! -d "$CPA_AUTH_DIR" ]; then
     log "已检测到旧的账号目录配置不可用：$CPA_AUTH_DIR"
