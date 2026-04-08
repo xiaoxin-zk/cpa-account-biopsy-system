@@ -202,8 +202,19 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleBootstrapState(w http.ResponseWriter, r *http.Request) {
+	a.ensureFreshReport(r.Context())
+	a.mu.RLock()
+	authCount := len(a.lastReport.Auths)
+	lastErr := a.lastErr
+	lastRunAt := a.lastRunAt
+	a.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"initialized": a.hasWebToken()})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"initialized": a.hasWebToken(),
+		"auth_count":  authCount,
+		"last_error":  lastErr,
+		"last_run_at": lastRunAt,
+	})
 }
 
 const indexHTML = `<!doctype html>
@@ -292,6 +303,7 @@ const indexHTML = `<!doctype html>
         <button id="loginBtn">进入面板</button>
       </div>
       <div class="helper" id="loginHelper">首次安装后，如果未设置密码，页面会引导你先完成初始化。</div>
+      <div class="helper" id="systemHelper"></div>
       <div class="small" id="loginMsg"></div>
     </div>
   </div>
@@ -376,10 +388,32 @@ const indexHTML = `<!doctype html>
     }
     function authHeaders(){ return authToken ? { Authorization: 'Bearer ' + authToken } : {}; }
     function showApp(ready){ el('loginBox').classList.toggle('hidden', ready); el('appBox').classList.toggle('hidden', !ready); }
+    function renderLoginStatus(data){
+      const authCount = Number(data && data.auth_count || 0);
+      const lastError = (data && data.last_error || '').trim();
+      if(lastError){
+        el('loginMsg').textContent = '后端状态异常: ' + lastError;
+        return;
+      }
+      if(authCount > 0){
+        el('loginMsg').textContent = '后端已读取 ' + authCount + ' 个账号，登录后即可查看详情。';
+        return;
+      }
+      el('loginMsg').textContent = '后端当前未读取到账号，请检查 auths 目录和安装自检输出。';
+    }
     async function loadBootstrapState(){
       const res = await fetch('/api/bootstrap-state');
       const data = await res.json();
       bootstrapInitialized = !!data.initialized;
+      const count = Number(data.auth_count || 0);
+      const lastErr = (data.last_error || '').trim();
+      if(lastErr){
+        el('systemHelper').textContent = '当前后端状态异常：' + lastErr;
+      } else if(count > 0) {
+        el('systemHelper').textContent = '系统已连接主项目，当前已读取 ' + count + ' 个账号。';
+      } else {
+        el('systemHelper').textContent = '当前尚未读取到账号信息。';
+      }
       if(!bootstrapInitialized){
         el('loginBtn').textContent = '初始化密码';
         el('loginDesc').textContent = '首次安装，请先设置仪表台密码。';
@@ -389,6 +423,7 @@ const indexHTML = `<!doctype html>
         el('loginDesc').textContent = '请输入活检页面口令。';
         el('loginHelper').textContent = '如忘记密码，可在登录后使用“修改密码”。';
       }
+      renderLoginStatus(data || {});
     }
     function ringCard(title, segments, text, legend){
       const total = segments.reduce((sum, seg) => sum + seg.value, 0);

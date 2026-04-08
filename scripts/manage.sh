@@ -21,6 +21,16 @@ run_cmd() {
   "$@"
 }
 
+http_get_code() {
+  local url="$1"
+  shift || true
+  if [ "$TEST_MODE" = "1" ]; then
+    printf '200'
+    return 0
+  fi
+  curl -fsS -o /dev/null -w '%{http_code}' --max-time 5 "$@" "$url"
+}
+
 format_access_addrs() {
   local listen_addr="$1"
   local port="${listen_addr#:}"
@@ -143,6 +153,44 @@ detect_common_paths() {
   fi
 }
 
+validate_host_inputs() {
+  [ -n "${CPA_AUTH_DIR:-}" ] || die "auths 目录为空，无法安装"
+  [ -d "$CPA_AUTH_DIR" ] || die "auths 目录不存在: $CPA_AUTH_DIR"
+  [ -n "${CPA_CONFIG_PATH:-}" ] || die "config.yaml 路径为空，无法安装"
+  [ -f "$CPA_CONFIG_PATH" ] || die "config.yaml 不存在: $CPA_CONFIG_PATH"
+}
+
+count_auth_files() {
+  local dir="$1"
+  find "$dir" -maxdepth 1 -type f -name '*.json' ! -name '.account-health-*' 2>/dev/null | wc -l | tr -d ' '
+}
+
+run_post_install_checks() {
+  validate_host_inputs
+  local auth_count listen_addr port sidecar_url sidecar_code mgmt_code
+  auth_count="$(count_auth_files "$CPA_AUTH_DIR")"
+  log "自检: auths 目录 $CPA_AUTH_DIR，检测到 $auth_count 个账号文件"
+  log "自检: config.yaml 路径 $CPA_CONFIG_PATH"
+
+  if [ -n "${CPA_MANAGEMENT_KEY:-}" ] && has_cmd curl; then
+    mgmt_code="$(http_get_code "$CPA_MANAGEMENT_URL/v0/management/auth-files/health" -H "Authorization: Bearer ${CPA_MANAGEMENT_KEY}")" || mgmt_code="000"
+    [ "$mgmt_code" = "200" ] || die "management API 自检失败: ${CPA_MANAGEMENT_URL}/v0/management/auth-files/health 返回 $mgmt_code，请检查管理地址或管理密码"
+    log "自检: management API 可用 -> $CPA_MANAGEMENT_URL"
+  fi
+
+  listen_addr="${CPA_LISTEN_ADDR:-:18317}"
+  port="${listen_addr#:}"
+  if [ -z "$port" ] || [ "$port" = "$listen_addr" ]; then
+    port="18317"
+  fi
+  sidecar_url="http://127.0.0.1:${port}/healthz"
+  if has_cmd curl; then
+    sidecar_code="$(http_get_code "$sidecar_url")" || sidecar_code="000"
+    [ "$sidecar_code" = "200" ] || die "sidecar 健康检查失败: $sidecar_url 返回 $sidecar_code"
+    log "自检: sidecar 健康检查通过 -> $sidecar_url"
+  fi
+}
+
 bootstrap_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
     run_cmd git -C "$INSTALL_DIR" fetch --tags origin
@@ -180,8 +228,10 @@ install_or_update() {
   log "开始安装/更新 CPA Account Biopsy System"
   bootstrap_repo
   prepare_config
+  validate_host_inputs
   cd "$INSTALL_DIR"
   run_cmd docker compose --env-file "$ENV_FILE" up -d --build
+  run_post_install_checks
   local listen_addr="${CPA_LISTEN_ADDR:-:18317}"
   log "完成"
   log "$(format_access_addrs "$listen_addr")"
