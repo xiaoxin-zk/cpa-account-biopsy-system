@@ -60,3 +60,9 @@ func (a *App) updateWebToken(token string) error {
 	a.mu.Unlock()
 	return nil
 }
+
+func (a *App) hasWebToken() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return strings.TrimSpace(a.webToken) != ""
+}

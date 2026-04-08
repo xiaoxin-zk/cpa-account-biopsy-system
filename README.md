@@ -38,22 +38,26 @@ CPA Account Biopsy System 是一个独立部署的账号活检 sidecar，专门�
 
 ### 快速安装
 
-安装或更新均可使用同一条命令：
+默认安装/更新命令：
 
 ```bash
-CPA_MANAGEMENT_URL=http://127.0.0.1:8317 \
-CPA_MANAGEMENT_KEY=你的管理密钥 \
-CPA_WEB_TOKEN=你想设置的页面密码 \
-CPA_AUTH_DIR=/你的主项目auths目录 \
-CPA_CONFIG_PATH=/你的主项目config.yaml路径 \
 bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/install.sh)
 ```
+
+脚本会自动尝试发现：
+
+- CLIProxyAPI 容器
+- auths 路径
+- config.yaml 路径
+- management 地址
+- MANAGEMENT_PASSWORD 环境变量
+
+如果某项自动发现失败，脚本只会针对缺失项交互询问。
 
 ### 配置项说明
 
 - `CPA_MANAGEMENT_URL`: 主项目 management API 地址
 - `CPA_MANAGEMENT_KEY`: 主项目 management 密钥
-- `CPA_WEB_TOKEN`: sidecar Web 登录密码
 - `CPA_AUTH_DIR`: 主项目 auths 目录
 - `CPA_CONFIG_PATH`: 主项目 config.yaml 路径
 - `CPA_LISTEN_ADDR`: sidecar 监听地址，默认 `:18317`
@@ -90,9 +94,7 @@ docker compose --env-file .env up -d --build
 ### 卸载方式
 
 ```bash
-cd /opt/cpa-account-biopsy-system
-docker compose --env-file .env down
-rm -rf /opt/cpa-account-biopsy-system
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/uninstall.sh)
 ```
 
 ### 与主项目对接方式
@@ -161,22 +163,26 @@ It does not replace the main service. It runs as a separate Docker service and t
 
 ### Quick Install
 
-Use the same command for both install and update:
+Default install/update command:
 
 ```bash
-CPA_MANAGEMENT_URL=http://127.0.0.1:8317 \
-CPA_MANAGEMENT_KEY=your_management_key \
-CPA_WEB_TOKEN=your_dashboard_password \
-CPA_AUTH_DIR=/path/to/cliproxy/auths \
-CPA_CONFIG_PATH=/path/to/cliproxy/config.yaml \
 bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/install.sh)
 ```
+
+The installer will try to auto-detect:
+
+- the CLIProxyAPI container
+- the auths directory
+- the config.yaml path
+- the management URL
+- the MANAGEMENT_PASSWORD runtime variable
+
+If auto-discovery fails for a required field, the script will ask only for the missing value.
 
 ### Configuration
 
 - `CPA_MANAGEMENT_URL`: CLIProxyAPI management API base URL
 - `CPA_MANAGEMENT_KEY`: CLIProxyAPI management password
-- `CPA_WEB_TOKEN`: dashboard login password
 - `CPA_AUTH_DIR`: path to CLIProxyAPI auths directory
 - `CPA_CONFIG_PATH`: path to CLIProxyAPI config.yaml
 - `CPA_LISTEN_ADDR`: listen address, default `:18317`
@@ -213,9 +219,7 @@ docker compose --env-file .env up -d --build
 ### Uninstall
 
 ```bash
-cd /opt/cpa-account-biopsy-system
-docker compose --env-file .env down
-rm -rf /opt/cpa-account-biopsy-system
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/uninstall.sh)
 ```
 
 ### Integration with CLIProxyAPI
@@ -251,3 +255,10 @@ curl http://127.0.0.1:18317/healthz
 
 Developer: Xiaoxin  
 Version: 0.1-bate
+#### 4. 首次访问为什么要求设置密码？
+
+因为安装命令默认不再要求你把 Web 密码写在命令行里。首次打开页面时会进入初始化流程，在浏览器中设置仪表台密码，之后会自动持久化保存。
+
+#### Why do I need to set a password on first visit?
+
+Because the simplified installer no longer forces you to pass a dashboard password in the command line. The first visit opens a Web initialization flow where you create the dashboard password, and the system persists it automatically.

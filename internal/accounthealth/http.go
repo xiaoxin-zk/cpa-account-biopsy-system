@@ -10,6 +10,7 @@ import (
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.handleIndex)
+	mux.HandleFunc("/api/bootstrap-state", a.handleBootstrapState)
 	mux.HandleFunc("/api/report", a.handleReport)
 	mux.HandleFunc("/api/run", a.handleRun)
 	mux.HandleFunc("/api/auth/action", a.handleAuthAction)
@@ -19,10 +20,7 @@ func (a *App) Handler() http.Handler {
 }
 
 func (a *App) accessToken() string {
-	if strings.TrimSpace(a.webToken) != "" {
-		return strings.TrimSpace(a.webToken)
-	}
-	return strings.TrimSpace(a.managementKey)
+	return strings.TrimSpace(a.webToken)
 }
 
 func (a *App) authorize(w http.ResponseWriter, r *http.Request) bool {
@@ -55,6 +53,11 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
+	if !a.hasWebToken() {
+		w.WriteHeader(http.StatusPreconditionRequired)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "dashboard password not initialized"})
+		return
+	}
 	if !a.authorize(w, r) {
 		return
 	}
@@ -75,6 +78,11 @@ func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleRun(w http.ResponseWriter, r *http.Request) {
+	if !a.hasWebToken() {
+		w.WriteHeader(http.StatusPreconditionRequired)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "dashboard password not initialized"})
+		return
+	}
 	if !a.authorize(w, r) {
 		return
 	}
@@ -88,6 +96,11 @@ func (a *App) handleRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAuthAction(w http.ResponseWriter, r *http.Request) {
+	if !a.hasWebToken() {
+		w.WriteHeader(http.StatusPreconditionRequired)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "dashboard password not initialized"})
+		return
+	}
 	if !a.authorize(w, r) {
 		return
 	}
@@ -158,7 +171,7 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
-	if !a.authorize(w, r) {
+	if a.hasWebToken() && !a.authorize(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -186,6 +199,11 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+}
+
+func (a *App) handleBootstrapState(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"initialized": a.hasWebToken()})
 }
 
 const indexHTML = `<!doctype html>
@@ -229,6 +247,7 @@ const indexHTML = `<!doctype html>
     .table { overflow:auto; max-height: calc(100vh - 260px); border:1px solid var(--line); border-radius:16px; }
     .login { max-width:420px; margin: 10vh auto; }
     .hidden { display:none; }
+    .helper { margin-top:12px; font-size:12px; color:var(--muted); }
     .ring-wrap { display:flex; align-items:center; gap:14px; }
     .ring { width:88px; height:88px; border-radius:50%; position:relative; flex:0 0 88px; }
     .ring::after { content:''; position:absolute; inset:10px; background:#121933; border-radius:50%; border:1px solid var(--line); }
@@ -267,11 +286,12 @@ const indexHTML = `<!doctype html>
     <div class="card">
       <div class="title">CPA账号活检系统</div>
       <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.1-bate</span></div>
-      <div class="muted" style="margin:10px 0 16px;">请输入活检页面口令。默认优先使用 AH_WEB_TOKEN，未配置时回退为管理口令。</div>
+      <div class="muted" id="loginDesc" style="margin:10px 0 16px;">请输入活检页面口令。</div>
       <div class="bar">
         <input id="token" type="password" placeholder="请输入页面口令">
         <button id="loginBtn">进入面板</button>
       </div>
+      <div class="helper" id="loginHelper">首次安装后，如果未设置密码，页面会引导你先完成初始化。</div>
       <div class="small" id="loginMsg"></div>
     </div>
   </div>
@@ -327,6 +347,7 @@ const indexHTML = `<!doctype html>
     let current = [];
     let selected = new Set();
     let authToken = localStorage.getItem('account-health-token') || '';
+    let bootstrapInitialized = true;
     function fmtTime(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d.getTime()) || d.getFullYear() <= 1) return '-'; return d.toLocaleString(); }
     function cls(s){ s=(s||'').toLowerCase(); if(['active','ok','recovered'].includes(s)) return 'active'; if(['quota'].includes(s)) return 'quota'; if(['blocked'].includes(s)) return 'blocked'; if(['cooling'].includes(s)) return 'cooling'; if(['unprobed'].includes(s)) return 'unprobed'; if(['disabled','error'].includes(s)) return s; return 'cooling'; }
     function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
@@ -355,6 +376,20 @@ const indexHTML = `<!doctype html>
     }
     function authHeaders(){ return authToken ? { Authorization: 'Bearer ' + authToken } : {}; }
     function showApp(ready){ el('loginBox').classList.toggle('hidden', ready); el('appBox').classList.toggle('hidden', !ready); }
+    async function loadBootstrapState(){
+      const res = await fetch('/api/bootstrap-state');
+      const data = await res.json();
+      bootstrapInitialized = !!data.initialized;
+      if(!bootstrapInitialized){
+        el('loginBtn').textContent = '初始化密码';
+        el('loginDesc').textContent = '首次安装，请先设置仪表台密码。';
+        el('loginHelper').textContent = '设置完成后将自动进入面板，并作为后续登录密码使用。';
+      } else {
+        el('loginBtn').textContent = '进入面板';
+        el('loginDesc').textContent = '请输入活检页面口令。';
+        el('loginHelper').textContent = '如忘记密码，可在登录后使用“修改密码”。';
+      }
+    }
     function ringCard(title, segments, text, legend){
       const total = segments.reduce((sum, seg) => sum + seg.value, 0);
       let start = 0;
@@ -541,6 +576,15 @@ const indexHTML = `<!doctype html>
     }
     async function login(){
       authToken = el('token').value.trim();
+      if(!bootstrapInitialized){
+        const res = await fetch('/api/settings/password', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ password:authToken }) });
+        const data = await res.json();
+        if(!res.ok){ el('loginMsg').textContent = data.error || '初始化失败'; return; }
+        localStorage.setItem('account-health-token', authToken);
+        await loadBootstrapState();
+        await load(false);
+        return;
+      }
       localStorage.setItem('account-health-token', authToken);
       await load(false);
     }
@@ -577,7 +621,7 @@ const indexHTML = `<!doctype html>
     el('loginBtn').onclick = login;
     el('token').addEventListener('keydown', e => { if(e.key === 'Enter') login(); });
     el('logout').onclick = () => { localStorage.removeItem('account-health-token'); authToken=''; showApp(false); };
-    if(authToken){ el('token').value = authToken; load(false); }
+    loadBootstrapState().then(() => { if(authToken && bootstrapInitialized){ el('token').value = authToken; load(false); } });
     setInterval(() => { if(authToken) load(false); }, 30000);
   </script>
 </body>
