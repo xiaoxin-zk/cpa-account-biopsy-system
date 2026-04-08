@@ -68,7 +68,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biops
 - `CPA_MANAGEMENT_URL`: 主项目 management API 地址
 - `CPA_MANAGEMENT_KEY`: 主项目 management 密钥
 - `CPA_AUTH_DIR`: 主项目 auths 目录
-- `CPA_CONFIG_PATH`: 主项目 config.yaml 路径
 - `CPA_LISTEN_ADDR`: sidecar 监听地址，默认 `:18317`
 - `CPA_SNAPSHOT_INTERVAL`: 快照刷新周期，默认 `5m`
 - `CPA_PROBE_INTERVAL`: 低频探测周期，默认 `1h`
@@ -109,7 +108,7 @@ docker compose --env-file .env up -d --build
 - sidecar 不替换主项目容器
 - sidecar 通过 `CPA_MANAGEMENT_URL` 调用主项目 management API
 - sidecar 通过 `CPA_AUTH_DIR` 读取账号文件
-- sidecar 通过 `CPA_CONFIG_PATH` 读取主项目配置
+- sidecar 不再依赖宿主机 config.yaml 挂载，核心依赖是 management API 与 auths 目录
 
 ### 常见问题
 
@@ -208,7 +207,6 @@ If auto-discovery fails for a required field, the script will ask only for the m
 - `CPA_MANAGEMENT_URL`: CLIProxyAPI management API base URL
 - `CPA_MANAGEMENT_KEY`: CLIProxyAPI management password
 - `CPA_AUTH_DIR`: path to CLIProxyAPI auths directory
-- `CPA_CONFIG_PATH`: path to CLIProxyAPI config.yaml
 - `CPA_LISTEN_ADDR`: listen address, default `:18317`
 - `CPA_SNAPSHOT_INTERVAL`: snapshot interval, default `5m`
 - `CPA_PROBE_INTERVAL`: low-frequency probe interval, default `1h`
@@ -248,7 +246,7 @@ Run the same unified command again and choose `Uninstall`.
 
 - The sidecar does not replace the main container
 - It reads account data from `CPA_AUTH_DIR`
-- It reads config from `CPA_CONFIG_PATH`
+- It no longer requires the host-side config.yaml mount; the essential inputs are the management API and the auths directory.
 - It queries the main service via `CPA_MANAGEMENT_URL`
 
 ### FAQ

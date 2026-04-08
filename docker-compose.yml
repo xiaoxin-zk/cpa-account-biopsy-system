@@ -9,10 +9,8 @@ services:
       AH_MANAGEMENT_KEY: ${CPA_MANAGEMENT_KEY:-}
       AH_WEB_TOKEN: ${CPA_WEB_TOKEN:-}
       AH_AUTH_DIR: ${CPA_AUTH_DIR}
-      AH_CONFIG_PATH: ${CPA_CONFIG_PATH}
       AH_SNAPSHOT_INTERVAL: ${CPA_SNAPSHOT_INTERVAL:-5m}
       AH_PROBE_INTERVAL: ${CPA_PROBE_INTERVAL:-1h}
     network_mode: host
     volumes:
       - ${CPA_AUTH_DIR}:${CPA_AUTH_DIR}
-      - ${CPA_CONFIG_PATH}:${CPA_CONFIG_PATH}:ro

@@ -274,8 +274,6 @@ detect_common_paths() {
 validate_host_inputs() {
   [ -n "${CPA_AUTH_DIR:-}" ] || die "auths 目录为空，无法安装"
   [ -d "$CPA_AUTH_DIR" ] || die "auths 目录不存在: $CPA_AUTH_DIR"
-  [ -n "${CPA_CONFIG_PATH:-}" ] || die "config.yaml 路径为空，无法安装"
-  [ -f "$CPA_CONFIG_PATH" ] || die "config.yaml 不存在: $CPA_CONFIG_PATH"
 }
 
 count_auth_files() {
@@ -288,7 +286,11 @@ run_post_install_checks() {
   local auth_count listen_addr port sidecar_url sidecar_code mgmt_code bootstrap_json bootstrap_auth_count bootstrap_error
   auth_count="$(count_auth_files "$CPA_AUTH_DIR")"
   log "自检: auths 目录 $CPA_AUTH_DIR，检测到 $auth_count 个账号文件"
-  log "自检: config.yaml 路径 $CPA_CONFIG_PATH"
+  if [ -n "${CPA_CONFIG_PATH:-}" ]; then
+    log "自检: config.yaml 路径 $CPA_CONFIG_PATH"
+  else
+    log "自检: 当前未使用宿主机 config.yaml 挂载"
+  fi
 
   if [ -n "${CPA_MANAGEMENT_KEY:-}" ] && has_cmd curl; then
     mgmt_code="$(http_get_code "$CPA_MANAGEMENT_URL/v0/management/auth-files/health" -H "Authorization: Bearer ${CPA_MANAGEMENT_KEY}")" || mgmt_code="000"
@@ -354,12 +356,10 @@ prepare_config() {
   fi
 
   prompt_if_empty CPA_AUTH_DIR "未自动找到 CLIProxyAPI 的账号目录，请输入 auths 目录路径"
-  prompt_if_empty CPA_CONFIG_PATH "未自动找到 CLIProxyAPI 的配置文件，请输入 config.yaml 路径"
   prompt_if_empty CPA_MANAGEMENT_URL "未自动获取到 CLIProxyAPI 管理地址，请输入管理地址（例如 http://127.0.0.1:8317）"
   prompt_if_empty CPA_MANAGEMENT_KEY "未自动获取到 CLIProxyAPI 管理密码，请输入你的 CLIProxyAPI 管理密码"
 
   upsert_env CPA_AUTH_DIR "${CPA_AUTH_DIR:-}"
-  upsert_env CPA_CONFIG_PATH "${CPA_CONFIG_PATH:-}"
   upsert_env CPA_MANAGEMENT_URL "${CPA_MANAGEMENT_URL:-}"
   upsert_env CPA_MANAGEMENT_KEY "${CPA_MANAGEMENT_KEY:-}"
   upsert_env CPA_LISTEN_ADDR "${CPA_LISTEN_ADDR:-:18317}"
