@@ -259,6 +259,9 @@ const indexHTML = `<!doctype html>
     .login { max-width:420px; margin: 10vh auto; }
     .hidden { display:none; }
     .helper { margin-top:12px; font-size:12px; color:var(--muted); }
+    .flash-updated { animation: flashUpdated 4s ease-out; }
+    .summary-box { margin-top:8px; padding:8px 10px; border:1px solid var(--line); border-radius:12px; background:#0d152d; font-size:12px; color:#cbd5e1; }
+    @keyframes flashUpdated { 0%% { background: rgba(34,197,94,.22); } 100%% { background: transparent; } }
     .ring-wrap { display:flex; align-items:center; gap:14px; }
     .ring { width:88px; height:88px; border-radius:50%; position:relative; flex:0 0 88px; }
     .ring::after { content:''; position:absolute; inset:10px; background:#121933; border-radius:50%; border:1px solid var(--line); }
@@ -313,6 +316,7 @@ const indexHTML = `<!doctype html>
         <div class="title">CPA账号活检系统</div>
         <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.1-bate</span></div>
         <div class="muted" id="meta">正在加载...</div>
+        <div class="summary-box hidden" id="probeSummary"></div>
       </div>
       <div class="bar">
         <input id="keyword" placeholder="搜索 账号 / 邮箱 / 备注 / 状态 / provider">
@@ -360,6 +364,7 @@ const indexHTML = `<!doctype html>
     let selected = new Set();
     let authToken = localStorage.getItem('account-health-token') || '';
     let bootstrapInitialized = true;
+    let recentlyUpdated = new Set();
     function fmtTime(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d.getTime()) || d.getFullYear() <= 1) return '-'; return d.toLocaleString(); }
     function cls(s){ s=(s||'').toLowerCase(); if(['active','ok','recovered'].includes(s)) return 'active'; if(['quota'].includes(s)) return 'quota'; if(['blocked'].includes(s)) return 'blocked'; if(['cooling'].includes(s)) return 'cooling'; if(['unprobed'].includes(s)) return 'unprobed'; if(['disabled','error'].includes(s)) return s; return 'cooling'; }
     function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
@@ -536,6 +541,7 @@ const indexHTML = `<!doctype html>
       const filtered = items.filter(x => !kw || JSON.stringify(x).toLowerCase().includes(kw));
       el('rows').innerHTML = filtered.map(x => {
         const checked = selected.has(x.file_name) ? 'checked' : '';
+        const rowClass = recentlyUpdated.has(x.file_name) ? ' class="flash-updated"' : '';
         const provider = (x.provider || '').toLowerCase();
         const accountType = (x.provider || '-').toUpperCase();
         const switchState = x.disabled ? '停用' : '启用';
@@ -559,7 +565,7 @@ const indexHTML = `<!doctype html>
           '<button class="danger" onclick="runAction(\''+x.file_name+'\',\'delete\')">删除</button>'+
           '</div>';
         const importedAt = fmtTime(x.imported_at);
-        return '<tr><td><input type="checkbox" data-file="'+x.file_name+'" '+checked+' onchange="toggleOne(this)"></td><td>'+name+'</td><td>'+state+'</td><td>'+usage+'</td><td>'+(importedAt === '-' ? '<span class="small">-</span>' : importedAt)+'</td><td>'+actions+'</td></tr>';
+        return '<tr'+rowClass+'><td><input type="checkbox" data-file="'+x.file_name+'" '+checked+' onchange="toggleOne(this)"></td><td>'+name+'</td><td>'+state+'</td><td>'+usage+'</td><td>'+(importedAt === '-' ? '<span class="small">-</span>' : importedAt)+'</td><td>'+actions+'</td></tr>';
       }).join('');
       updateSelectionMeta(filtered);
     }
@@ -592,9 +598,34 @@ const indexHTML = `<!doctype html>
       cards(current); rows(current);
     }
     window.runAction = runAction;
+    function summarizeProbeChanges(beforeItems, afterItems){
+      const beforeMap = new Map((beforeItems || []).map(item => [item.file_name, item]));
+      const changed = [];
+      let toBlocked = 0, toQuota = 0, toActive = 0;
+      for(const item of (afterItems || [])){
+        const prev = beforeMap.get(item.file_name);
+        const prevKey = prev ? [prev.effective_state, prev.probe_status, prev.managed_reason].join('|') : '';
+        const nextKey = [item.effective_state, item.probe_status, item.managed_reason].join('|');
+        if(!prev || prevKey !== nextKey){
+          changed.push(item.file_name);
+          const kind = stateKind(item);
+          if(kind === 'blocked') toBlocked++;
+          if(kind === 'quota') toQuota++;
+          if(kind === 'active') toActive++;
+        }
+      }
+      return { changed, toBlocked, toQuota, toActive };
+    }
+    function setProbeSummary(text){
+      el('probeSummary').textContent = text;
+      el('probeSummary').classList.toggle('hidden', !text);
+    }
     async function load(run){
       const url = run ? '/api/run' : '/api/report';
-      el('meta').textContent = run ? '正在运行探测...' : '正在刷新快照...';
+      const before = current.slice();
+      el('meta').textContent = run ? '正在执行活检...' : '正在刷新快照...';
+      const probeBtn = el('probeNow');
+      if(run){ probeBtn.disabled = true; probeBtn.textContent = '活检中...'; setProbeSummary('活检正在执行，请稍候...'); }
       try {
         const res = await fetch(url, { method: run ? 'POST' : 'GET', headers: authHeaders() });
         if(res.status === 401){ showApp(false); el('loginMsg').textContent = '口令错误或未登录'; return; }
@@ -602,11 +633,21 @@ const indexHTML = `<!doctype html>
         const report = data.report || {};
         current = report.auths || [];
         showApp(true);
-        const actionText = run ? '探测完成' : '快照已刷新';
+        const actionText = run ? '活检完成' : '快照已刷新';
         el('meta').textContent = actionText + ' | 最近运行: ' + fmtTime(data.last_run_at || report.generated_at) + (data.last_error ? ' | 错误: ' + data.last_error : '');
+        if(run){
+          const summary = summarizeProbeChanges(before, current);
+          recentlyUpdated = new Set(summary.changed);
+          setProbeSummary('本次活检已完成，更新了 ' + summary.changed.length + ' 个账号状态；其中 401封禁 ' + summary.toBlocked + ' 个，额度受限 ' + summary.toQuota + ' 个，恢复正常 ' + summary.toActive + ' 个。');
+          setTimeout(() => { recentlyUpdated = new Set(); rows(current); }, 4000);
+        }
         cards(current); rows(current);
       } catch (error) {
-        el('meta').textContent = '操作失败: ' + (error && error.message ? error.message : error);
+        const message = (error && error.message ? error.message : error);
+        el('meta').textContent = '操作失败: ' + message;
+        if(run) setProbeSummary('活检失败：' + message);
+      } finally {
+        if(run){ probeBtn.disabled = false; probeBtn.textContent = '运行探测'; }
       }
     }
     async function login(){
