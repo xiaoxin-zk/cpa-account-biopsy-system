@@ -1,0 +1,18 @@
+services:
+  cpa-account-biopsy-system:
+    build: .
+    container_name: cpa-account-biopsy-system
+    restart: unless-stopped
+    environment:
+      AH_LISTEN_ADDR: ${CPA_LISTEN_ADDR:-:18317}
+      AH_MANAGEMENT_URL: ${CPA_MANAGEMENT_URL:-http://127.0.0.1:8317}
+      AH_MANAGEMENT_KEY: ${CPA_MANAGEMENT_KEY:-}
+      AH_WEB_TOKEN: ${CPA_WEB_TOKEN:-}
+      AH_AUTH_DIR: ${CPA_AUTH_DIR}
+      AH_CONFIG_PATH: ${CPA_CONFIG_PATH}
+      AH_SNAPSHOT_INTERVAL: ${CPA_SNAPSHOT_INTERVAL:-5m}
+      AH_PROBE_INTERVAL: ${CPA_PROBE_INTERVAL:-1h}
+    network_mode: host
+    volumes:
+      - ${CPA_AUTH_DIR}:${CPA_AUTH_DIR}
+      - ${CPA_CONFIG_PATH}:${CPA_CONFIG_PATH}:ro

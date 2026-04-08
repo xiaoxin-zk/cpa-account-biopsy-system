@@ -1,0 +1,584 @@
+package accounthealth
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+)
+
+func (a *App) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", a.handleIndex)
+	mux.HandleFunc("/api/report", a.handleReport)
+	mux.HandleFunc("/api/run", a.handleRun)
+	mux.HandleFunc("/api/auth/action", a.handleAuthAction)
+	mux.HandleFunc("/api/settings/password", a.handleChangePassword)
+	mux.HandleFunc("/healthz", a.handleHealthz)
+	return mux
+}
+
+func (a *App) accessToken() string {
+	if strings.TrimSpace(a.webToken) != "" {
+		return strings.TrimSpace(a.webToken)
+	}
+	return strings.TrimSpace(a.managementKey)
+}
+
+func (a *App) authorize(w http.ResponseWriter, r *http.Request) bool {
+	secret := a.accessToken()
+	if secret == "" {
+		return true
+	}
+	token := strings.TrimSpace(r.Header.Get("Authorization"))
+	if token != "" {
+		parts := strings.SplitN(token, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
+			token = parts[1]
+		}
+	}
+	if token == "" {
+		token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	if token != secret {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "unauthorized"})
+		return false
+	}
+	return true
+}
+
+func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(indexHTML))
+}
+
+func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
+	if !a.authorize(w, r) {
+		return
+	}
+	a.ensureFreshReport(r.Context())
+	a.mu.RLock()
+	report := a.lastReport
+	lastRunAt := a.lastRunAt
+	lastErr := a.lastErr
+	lastProbe := a.lastProbe
+	a.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"report":      report,
+		"last_run_at": lastRunAt,
+		"last_error":  lastErr,
+		"last_probe":  lastProbe,
+	})
+}
+
+func (a *App) handleRun(w http.ResponseWriter, r *http.Request) {
+	if !a.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	report := a.refresh(r.Context(), true)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "report": report})
+}
+
+func (a *App) handleAuthAction(w http.ResponseWriter, r *http.Request) {
+	if !a.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		FileName  string   `json:"file_name"`
+		FileNames []string `json:"file_names"`
+		Action    string   `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid body"})
+		return
+	}
+	body.FileName = strings.TrimSpace(body.FileName)
+	body.Action = strings.TrimSpace(strings.ToLower(body.Action))
+	files := make([]string, 0, len(body.FileNames)+1)
+	if body.FileName != "" {
+		files = append(files, body.FileName)
+	}
+	for _, fileName := range body.FileNames {
+		fileName = strings.TrimSpace(fileName)
+		if fileName != "" {
+			files = append(files, fileName)
+		}
+	}
+	if len(files) == 0 || body.Action == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "file_name or file_names and action are required"})
+		return
+	}
+	if body.Action != "enable" && body.Action != "disable" && body.Action != "delete" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "unsupported action"})
+		return
+	}
+	failed := make(map[string]string)
+	for _, fileName := range files {
+		var err error
+		switch body.Action {
+		case "enable":
+			err = a.setAuthDisabled(fileName, false, "manual enable from web")
+		case "disable":
+			err = a.setAuthDisabled(fileName, true, "manual disable from web")
+		case "delete":
+			err = a.deleteAuth(fileName)
+		}
+		if err != nil {
+			failed[fileName] = err.Error()
+		}
+	}
+	if len(failed) > 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "partial failure", "failed": failed})
+		return
+	}
+	report := a.refresh(r.Context(), false)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "report": report})
+}
+
+func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "time": time.Now().UTC()})
+}
+
+func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if !a.authorize(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid body"})
+		return
+	}
+	body.Password = strings.TrimSpace(body.Password)
+	if len(body.Password) < 6 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "password must be at least 6 characters"})
+		return
+	}
+	if err := a.updateWebToken(body.Password); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+}
+
+const indexHTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CPA账号活检系统</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --card:#121933; --muted:#8ea0c9; --text:#edf2ff; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --line:#273252; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background: linear-gradient(180deg,#0a0f1d,#111936 60%,#0a1022); color:var(--text); }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .top { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:18px; }
+    .title { font-size: 28px; font-weight:700; }
+    .muted { color: var(--muted); }
+    .brand-meta { margin-top:8px; font-size:12px; color:var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
+    .grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .card { background: rgba(18,25,51,.88); border:1px solid var(--line); border-radius:16px; padding:16px; backdrop-filter: blur(12px); }
+    .num { font-size: 28px; font-weight: 700; margin-top: 8px; }
+    .bar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 14px; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin: 0 0 14px; }
+    .toolbar-group { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    button { background:#5b7cff; color:#fff; border:none; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:600; }
+    button.danger { background:#8b1e35; }
+    button.warn { background:#8a5a0a; }
+    button.ghost { background:#19233f; }
+    input { background:#0b1226; color:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-width: 260px; }
+    table { width:100%; border-collapse: collapse; font-size:14px; }
+    th,td { border-bottom:1px solid var(--line); padding:10px 8px; text-align:left; vertical-align: top; }
+    th { color:#b9c7ea; font-weight:600; position: sticky; top: 0; background:#121933; }
+    .tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .meter { margin-top:8px; height:8px; width:100%; background:#0b1226; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+    .meter > span { display:block; height:100%; border-radius:999px; }
+    .active { background:rgba(34,197,94,.16); color:#86efac; }
+    .quota { background:rgba(245,158,11,.16); color:#fcd34d; }
+    .blocked,.error,.disabled { background:rgba(239,68,68,.16); color:#fca5a5; }
+    .cooling { background:rgba(96,165,250,.16); color:#93c5fd; }
+    .unprobed { background:rgba(148,163,184,.16); color:#cbd5e1; }
+    .small { font-size:12px; color:var(--muted); }
+    .table { overflow:auto; max-height: calc(100vh - 260px); border:1px solid var(--line); border-radius:16px; }
+    .login { max-width:420px; margin: 10vh auto; }
+    .hidden { display:none; }
+    .ring-wrap { display:flex; align-items:center; gap:14px; }
+    .ring { width:88px; height:88px; border-radius:50%; position:relative; flex:0 0 88px; }
+    .ring::after { content:''; position:absolute; inset:10px; background:#121933; border-radius:50%; border:1px solid var(--line); }
+    .ring-value { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-weight:700; z-index:1; }
+    .legend { display:flex; gap:10px; flex-wrap:wrap; }
+    .legend span { font-size:12px; color:var(--muted); }
+    .quota-box { margin-top:8px; border:1px solid var(--line); border-radius:12px; padding:8px; background:#0d152d; }
+    .quota-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
+    .quota-value { font-weight:700; }
+    .quota-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+    .quota-mini { display:flex; flex-direction:column; gap:4px; padding:6px 8px; border:1px solid var(--line); border-radius:10px; background:#0d152d; }
+    .quota-mini-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    .quota-mini .label { font-size:12px; color:var(--muted); }
+    .quota-mini .value { font-size:12px; color:#e2e8f0; font-weight:700; white-space:nowrap; }
+    .pill-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:#cbd5e1; background:#0d152d; }
+    .provider-pill { font-weight:700; }
+    .switch-pill { font-weight:700; }
+    .switch-enabled { color:#86efac; border-color:#22c55e; background:rgba(34,197,94,.14); }
+    .switch-disabled { color:#fca5a5; border-color:#ef4444; background:rgba(239,68,68,.14); }
+    .provider-codex { color:#93c5fd; border-color:#3b82f6; background:rgba(59,130,246,.14); }
+    .provider-claude { color:#fcd34d; border-color:#f59e0b; background:rgba(245,158,11,.14); }
+    .provider-gemini { color:#86efac; border-color:#22c55e; background:rgba(34,197,94,.14); }
+    .provider-qwen,.provider-kimi,.provider-iflow { color:#c4b5fd; border-color:#8b5cf6; background:rgba(139,92,246,.14); }
+    .action-row { display:flex; gap:6px; flex-wrap:wrap; }
+    .stat-good { color:#86efac; font-weight:700; }
+    .stat-bad { color:#fca5a5; font-weight:700; }
+    .quota-stack { display:flex; flex-direction:column; gap:6px; min-width:260px; }
+    .quota-empty { padding:6px 8px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); font-size:12px; }
+    @media (max-width: 980px) { .grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap login" id="loginBox">
+    <div class="card">
+      <div class="title">CPA账号活检系统</div>
+      <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.1-bate</span></div>
+      <div class="muted" style="margin:10px 0 16px;">请输入活检页面口令。默认优先使用 AH_WEB_TOKEN，未配置时回退为管理口令。</div>
+      <div class="bar">
+        <input id="token" type="password" placeholder="请输入页面口令">
+        <button id="loginBtn">进入面板</button>
+      </div>
+      <div class="small" id="loginMsg"></div>
+    </div>
+  </div>
+  <div class="wrap hidden" id="appBox">
+    <div class="top">
+      <div>
+        <div class="title">CPA账号活检系统</div>
+        <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.1-bate</span></div>
+        <div class="muted" id="meta">正在加载...</div>
+      </div>
+      <div class="bar">
+        <input id="keyword" placeholder="搜索 账号 / 邮箱 / 备注 / 状态 / provider">
+        <button id="refresh">刷新快照</button>
+        <button id="probeNow" class="ghost">运行探测</button>
+        <button id="changePassword" class="ghost">修改密码</button>
+        <button id="logout" class="ghost">退出登录</button>
+      </div>
+    </div>
+    <div class="grid" id="cards"></div>
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="pickBlocked" class="danger">选择401封禁</button>
+        <button id="pickQuota" class="warn">选择额度耗尽</button>
+        <button id="pickActive" class="ghost">选择正常账号</button>
+        <button id="pickDisabled" class="ghost">选择已停用</button>
+        <button id="clearSelection" class="ghost">清空选择</button>
+      </div>
+      <div class="toolbar-group">
+        <button id="batchEnable" class="ghost">批量启用</button>
+        <button id="batchDisable" class="warn">批量停用</button>
+        <button id="batchDelete" class="danger">批量删除</button>
+      </div>
+      <div class="small" id="selectionMeta">已选择 0 个账号</div>
+    </div>
+    <div class="table">
+      <table>
+        <thead>
+          <tr>
+            <th><input id="checkAll" type="checkbox"></th>
+            <th>账号</th>
+            <th>账号健康 / 额度</th>
+            <th>请求统计</th>
+            <th>导入时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    const el = id => document.getElementById(id);
+    let current = [];
+    let selected = new Set();
+    let authToken = localStorage.getItem('account-health-token') || '';
+    function fmtTime(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d.getTime()) || d.getFullYear() <= 1) return '-'; return d.toLocaleString(); }
+    function cls(s){ s=(s||'').toLowerCase(); if(['active','ok','recovered'].includes(s)) return 'active'; if(['quota'].includes(s)) return 'quota'; if(['blocked'].includes(s)) return 'blocked'; if(['cooling'].includes(s)) return 'cooling'; if(['unprobed'].includes(s)) return 'unprobed'; if(['disabled','error'].includes(s)) return s; return 'cooling'; }
+    function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
+    function stateKind(x){
+      if(x.probe_current === false) return 'unprobed';
+      if(x.effective_state === 'blocked' || x.managed_reason === 'blocked' || x.probe_status === 'blocked') return 'blocked';
+      if(x.probe_http_status === 401 && !x.probe_status && x.effective_state !== 'quota') return 'blocked';
+      if(x.effective_state === 'quota' || x.managed_reason === 'quota' || x.probe_status === 'quota') return 'quota';
+      if(x.effective_state === 'active') return 'active';
+      if(x.disabled) return 'disabled';
+      return x.effective_state || 'unknown';
+    }
+    function meterInfo(x){
+      const kind = stateKind(x);
+      if(kind === 'blocked') return { label:'额度状态: 401封禁', value:100, color:'#ef4444', exact:false };
+      if(kind === 'quota') return { label:'额度状态: 额度/限流异常', value:100, color:'#f59e0b', exact:false };
+      if(kind === 'disabled') return { label:'额度状态: 手动/策略停用', value:100, color:'#6b7280', exact:false };
+      if(x.subscription_active_until) return { label:'订阅状态', value:100, color:'#22c55e', text:'有效', exact:false };
+      if((x.plan_type||'').toLowerCase() === 'free') return { label:'Free', value:100, color:'#60a5fa', text:'100%', exact:false };
+      if((x.proxy_requests||0) > 0 || (x.proxy_tokens||0) > 0) return { label:'额度未知: 仅统计代理使用量', value:100, color:'#a78bfa', exact:false };
+      return { label:'额度未知: 暂无真实余额接口', value:100, color:'#475569', exact:false };
+    }
+    function meter(x){
+      const info = meterInfo(x);
+      return '<div class="quota-box"><div class="quota-head"><div class="small">'+info.label+'</div><div class="quota-value">'+(info.text || '')+'</div></div><div class="meter"><span style="width:'+info.value+'%;background:'+info.color+'"></span></div></div>';
+    }
+    function authHeaders(){ return authToken ? { Authorization: 'Bearer ' + authToken } : {}; }
+    function showApp(ready){ el('loginBox').classList.toggle('hidden', ready); el('appBox').classList.toggle('hidden', !ready); }
+    function ringCard(title, segments, text, legend){
+      const total = segments.reduce((sum, seg) => sum + seg.value, 0);
+      let start = 0;
+      const parts = [];
+      segments.forEach(seg => {
+        const size = total > 0 ? (seg.value / total) * 100 : 0;
+        const end = start + size;
+        if(size > 0) parts.push(seg.color + ' ' + start + '% ' + end + '%');
+        start = end;
+      });
+      parts.push('#202b49 ' + start + '% 100%');
+      return '<div class="card"><div class="muted">'+title+'</div><div class="ring-wrap"><div class="ring" style="background:conic-gradient('+parts.join(', ')+')"><div class="ring-value">'+text+'</div></div><div><div class="num" style="margin-top:0">'+text+'</div><div class="legend">'+legend+'</div></div></div></div>';
+    }
+    function cards(items){
+      const total = items.length;
+      const active = items.filter(x => stateKind(x) === 'active').length;
+      const blocked = items.filter(x => stateKind(x) === 'blocked').length;
+      const quota = items.filter(x => stateKind(x) === 'quota').length;
+      const disabled = items.filter(x => x.disabled).length;
+      const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
+      const failures = items.reduce((sum, x) => sum + (x.proxy_failures || 0), 0);
+      const healthLegend = '<span style="color:#86efac">正常 '+active+'</span><span style="color:#fcd34d">额度 '+quota+'</span><span style="color:#fca5a5">封禁 '+blocked+'</span>';
+      el('cards').innerHTML = ringCard('号池健康度', [
+        { color:'#22c55e', value:active },
+        { color:'#f59e0b', value:quota },
+        { color:'#ef4444', value:blocked }
+      ], total, healthLegend) +
+        '<div class="card"><div class="muted">总账号</div><div class="num">'+total+'</div></div>'+
+        '<div class="card"><div class="muted">总请求</div><div class="num">'+requests+'</div></div>'+
+        '<div class="card"><div class="muted">请求失败</div><div class="num">'+failures+'</div></div>'+
+        '<div class="card"><div class="muted">401封禁</div><div class="num" style="color:#fca5a5">'+blocked+'</div></div>'+
+        '<div class="card"><div class="muted">额度耗尽</div><div class="num" style="color:#fcd34d">'+quota+'</div></div>'+
+        '<div class="card"><div class="muted">正常账号</div><div class="num" style="color:#86efac">'+active+'</div></div>'+
+        '<div class="card"><div class="muted">已停用</div><div class="num">'+disabled+'</div></div>';
+    }
+    function updateSelectionMeta(filtered){
+      const all = filtered || current;
+      el('selectionMeta').textContent = '已选择 ' + selected.size + ' 个账号';
+      el('checkAll').checked = all.length > 0 && all.every(x => selected.has(x.file_name));
+    }
+    function quotaVisual(value){
+      if(value <= 0) return { color:'#64748b', text:'已耗尽' };
+      if(value <= 33) return { color:'#ef4444', text:'剩余 ' + value + '%' };
+      if(value <= 66) return { color:'#f59e0b', text:'剩余 ' + value + '%' };
+      return { color:'#22c55e', text:'剩余 ' + value + '%' };
+    }
+    function quotaItemBox(item, options){
+      if(!item) return '';
+      options = options || {};
+      const neutral = !!options.neutral;
+      const exhausted = !!options.exhausted;
+      const hasPercentField = item.percent !== undefined && item.percent !== null && item.percent !== '';
+      const known = item.percent_known === true;
+      const hasReset = !!(item.reset_at && String(item.reset_at).trim());
+      const value = known ? Math.max(0, Math.min(100, hasPercentField ? Number(item.percent) || 0 : 0)) : (hasReset ? 100 : 0);
+      const visual = quotaVisual(value);
+      const color = neutral ? '#475569' : (exhausted ? '#64748b' : visual.color);
+      const title = item.title || '额度';
+      const reset = hasReset ? '<div class="small">'+item.reset_at+'</div>' : '';
+      let text = '';
+      if (known) {
+        text = exhausted && value === 0 ? (hasReset ? '等待重置' : '已耗尽') : visual.text;
+      } else if (hasReset) {
+        text = exhausted ? '等待重置' : '已采集';
+      } else if (neutral) {
+        text = '未采集';
+      } else {
+        text = '额度耗尽';
+      }
+      return '<div class="quota-mini"><div class="quota-mini-top"><span class="label">'+title+'</span><span class="value">'+text+'</span></div>'+(reset?reset:'')+'<div class="meter"><span style="width:'+value+'%;background:'+color+'"></span></div></div>';
+    }
+    function fallbackQuotaItems(x){
+      const plan = (x.plan_type || '').toLowerCase();
+      if(plan === 'free') return [{ title:'周限额' }, { title:'代码审查周限额' }];
+      if(plan === 'team' || plan === 'plus') return [{ title:'5小时限额' }, { title:'周限额' }, { title:'代码审查周限额' }];
+      return [];
+    }
+    function quotaReasonBox(text){
+      return '<div class="quota-empty">'+text+'</div>';
+    }
+    function quotaBoxes(x){
+      const kind = stateKind(x);
+      if(Array.isArray(x.quota_items) && x.quota_items.length > 0){
+        const relevant = x.quota_items.filter(item => item && (item.percent_known === true || !!(item.reset_at && String(item.reset_at).trim())));
+        const rendered = relevant.map(item => quotaItemBox(item, { neutral:false, exhausted:((item.percent_known === true && Number(item.percent || 0) <= 0) || (!(item.percent_known === true) && !!item.reset_at && kind === 'quota')) })).filter(Boolean).join('');
+        if(rendered) return '<div class="quota-stack">'+rendered+'</div>';
+      }
+      if(x.quota_percent_known){
+        return quotaItemBox({ title:x.quota_title, percent:x.quota_percent, percent_known:x.quota_percent_known, reset_at:x.quota_reset_at }, { neutral:false, exhausted:(kind === 'quota' && Number(x.quota_percent || 0) <= 0) });
+      }
+      if(kind === 'quota') {
+	        const fallback = fallbackQuotaItems(x);
+	        if(fallback.length) return '<div class="quota-stack">'+fallback.map(item => quotaItemBox({ title:item.title, reset_at:x.quota_reset_at }, { neutral:false, exhausted:true })).join('')+'</div>';
+	        return quotaReasonBox('额度受限，等待重置');
+      }
+      if(kind === 'unprobed') {
+	        return quotaReasonBox('未探测');
+      }
+      if(kind === 'blocked') {
+	        return quotaReasonBox('401封禁，未返回额度');
+      }
+	      if(!x.probe_status) return quotaReasonBox('未探测');
+	      if(x.probe_status === 'ok') return quotaReasonBox('已探测，未返回额度');
+	      if(x.probe_status === 'error' || x.probe_status === 'unsupported') return quotaReasonBox('探测失败');
+	      return quotaReasonBox('无额度数据');
+    }
+    function rows(items){
+      const kw = el('keyword').value.trim().toLowerCase();
+      const filtered = items.filter(x => !kw || JSON.stringify(x).toLowerCase().includes(kw));
+      el('rows').innerHTML = filtered.map(x => {
+        const checked = selected.has(x.file_name) ? 'checked' : '';
+        const provider = (x.provider || '').toLowerCase();
+        const accountType = (x.provider || '-').toUpperCase();
+        const switchState = x.disabled ? '停用' : '启用';
+        const switchClass = x.disabled ? 'switch-disabled' : 'switch-enabled';
+        const name = '<div class="pill-row"><span class="pill provider-pill provider-'+provider+'">'+accountType+'</span><span class="pill switch-pill '+switchClass+'">'+switchState+'</span></div><strong>'+ (x.email || x.display_name || x.file_name || '-') +'</strong>';
+        const success = Math.max(0, (x.proxy_requests||0) - (x.proxy_failures||0));
+        const usageParts = ['请求: '+(x.proxy_requests||0), '<span class="stat-good">成功: '+success+'</span> / <span class="stat-bad">失败: '+(x.proxy_failures||0)+'</span>', 'Tokens: '+(x.proxy_tokens||0)];
+        if(fmtTime(x.proxy_last_used_at) !== '-') usageParts.push('<span class="small">最后使用: '+fmtTime(x.proxy_last_used_at)+'</span>');
+        const usage = usageParts.join('<br>');
+        const kind = stateKind(x);
+        const stateParts = [tag(kind)];
+        const renderedQuotaBoxes = quotaBoxes(x);
+        if(renderedQuotaBoxes) stateParts.push(renderedQuotaBoxes);
+        const pills = [];
+        if((x.plan_type||'').trim()) pills.push('<span class="pill">'+x.plan_type+'</span>');
+        if(pills.length) stateParts.push('<div class="pill-row">'+pills.join('')+'</div>');
+        const state = stateParts.join('<br>');
+        const actions = '<div class="action-row">'+
+          '<button class="ghost" onclick="runAction(\''+x.file_name+'\',\'enable\')">启用</button>'+
+          '<button class="warn" onclick="runAction(\''+x.file_name+'\',\'disable\')">停用</button>'+
+          '<button class="danger" onclick="runAction(\''+x.file_name+'\',\'delete\')">删除</button>'+
+          '</div>';
+        const importedAt = fmtTime(x.imported_at);
+        return '<tr><td><input type="checkbox" data-file="'+x.file_name+'" '+checked+' onchange="toggleOne(this)"></td><td>'+name+'</td><td>'+state+'</td><td>'+usage+'</td><td>'+(importedAt === '-' ? '<span class="small">-</span>' : importedAt)+'</td><td>'+actions+'</td></tr>';
+      }).join('');
+      updateSelectionMeta(filtered);
+    }
+    function toggleOne(input){
+      const fileName = input.getAttribute('data-file');
+      if(input.checked) selected.add(fileName); else selected.delete(fileName);
+      updateSelectionMeta();
+    }
+    window.toggleOne = toggleOne;
+    function selectBy(predicate){
+      const targets = current.filter(predicate).map(x => x.file_name);
+      const allSelected = targets.length > 0 && targets.every(name => selected.has(name));
+      if(allSelected) targets.forEach(name => selected.delete(name));
+      else targets.forEach(name => selected.add(name));
+      rows(current);
+    }
+    async function runAction(fileName, action){
+      return runBatchAction(action, [fileName]);
+    }
+    async function runBatchAction(action, files){
+      const textMap = { enable:'启用', disable:'停用', delete:'删除' };
+      files = (files || []).filter(Boolean);
+      if(!files.length){ alert('请先选择账号'); return; }
+      if(!confirm('确认要'+textMap[action]+' '+files.length+' 个账号吗？')) return;
+      const res = await fetch('/api/auth/action', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ file_names:files, action }) });
+      const data = await res.json();
+      if(!res.ok){ alert(data.error || '操作失败'); return; }
+      files.forEach(file => selected.delete(file));
+      current = (data.report && data.report.auths) || current;
+      cards(current); rows(current);
+    }
+    window.runAction = runAction;
+    async function load(run){
+      const url = run ? '/api/run' : '/api/report';
+      el('meta').textContent = run ? '正在运行探测...' : '正在刷新快照...';
+      try {
+        const res = await fetch(url, { method: run ? 'POST' : 'GET', headers: authHeaders() });
+        if(res.status === 401){ showApp(false); el('loginMsg').textContent = '口令错误或未登录'; return; }
+        const data = await res.json();
+        const report = data.report || {};
+        current = report.auths || [];
+        showApp(true);
+        const actionText = run ? '探测完成' : '快照已刷新';
+        el('meta').textContent = actionText + ' | 最近运行: ' + fmtTime(data.last_run_at || report.generated_at) + (data.last_error ? ' | 错误: ' + data.last_error : '');
+        cards(current); rows(current);
+      } catch (error) {
+        el('meta').textContent = '操作失败: ' + (error && error.message ? error.message : error);
+      }
+    }
+    async function login(){
+      authToken = el('token').value.trim();
+      localStorage.setItem('account-health-token', authToken);
+      await load(false);
+    }
+    async function changePassword(){
+      const value = prompt('请输入新的仪表台密码（至少6位）');
+      if(!value) return;
+      const res = await fetch('/api/settings/password', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ password:value }) });
+      const data = await res.json();
+      if(!res.ok){ alert(data.error || '修改失败'); return; }
+      authToken = value.trim();
+      localStorage.setItem('account-health-token', authToken);
+      el('token').value = authToken;
+      alert('密码已修改并生效。');
+    }
+    el('refresh').onclick = () => load(false);
+    el('probeNow').onclick = () => load(true);
+    el('changePassword').onclick = () => changePassword();
+    el('keyword').oninput = () => rows(current);
+    el('checkAll').onchange = e => {
+      const kw = el('keyword').value.trim().toLowerCase();
+      const filtered = current.filter(x => !kw || JSON.stringify(x).toLowerCase().includes(kw));
+      if(e.target.checked) filtered.forEach(x => selected.add(x.file_name));
+      else filtered.forEach(x => selected.delete(x.file_name));
+      rows(current);
+    };
+    el('pickBlocked').onclick = () => selectBy(x => stateKind(x) === 'blocked');
+    el('pickQuota').onclick = () => selectBy(x => stateKind(x) === 'quota');
+    el('pickActive').onclick = () => selectBy(x => stateKind(x) === 'active');
+    el('pickDisabled').onclick = () => selectBy(x => x.disabled);
+    el('clearSelection').onclick = () => { selected.clear(); rows(current); };
+    el('batchEnable').onclick = () => runBatchAction('enable', Array.from(selected));
+    el('batchDisable').onclick = () => runBatchAction('disable', Array.from(selected));
+    el('batchDelete').onclick = () => runBatchAction('delete', Array.from(selected));
+    el('loginBtn').onclick = login;
+    el('token').addEventListener('keydown', e => { if(e.key === 'Enter') login(); });
+    el('logout').onclick = () => { localStorage.removeItem('account-health-token'); authToken=''; showApp(false); };
+    if(authToken){ el('token').value = authToken; load(false); }
+    setInterval(() => { if(authToken) load(false); }, 30000);
+  </script>
+</body>
+</html>`
