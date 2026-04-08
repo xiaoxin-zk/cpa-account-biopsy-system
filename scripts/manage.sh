@@ -28,7 +28,7 @@ http_get_code() {
     printf '200'
     return 0
   fi
-  curl -fsS -o /dev/null -w '%{http_code}' --max-time 5 "$@" "$url"
+  curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$@" "$url"
 }
 
 format_access_addrs() {
@@ -127,32 +127,29 @@ detect_container_name() {
 detect_from_container() {
   local name="$1"
   [ -n "$name" ] || return 0
-  local inspect envs binds
+  local inspect envs binds discovered_auth_dir="" discovered_config_path="" discovered_management_key="" detected_port=""
   log "已发现主项目容器: $name"
   inspect="$(docker inspect "$name" --format '{{range .Mounts}}{{println .Destination "=" .Source}}{{end}}' 2>/dev/null || true)"
   envs="$(docker inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true)"
   binds="$(docker inspect "$name" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}' 2>/dev/null || true)"
-  if [ -z "${CPA_AUTH_DIR:-}" ]; then
-    CPA_AUTH_DIR="$(printf '%s' "$inspect" | awk -F' = ' '$1=="/root/.cli-proxy-api"{print $2}' | head -n 1)"
+  discovered_auth_dir="$(printf '%s' "$inspect" | awk -F' = ' '$1=="/root/.cli-proxy-api"{print $2}' | head -n 1)"
+  if [ -z "$discovered_auth_dir" ]; then
+    discovered_auth_dir="$(printf '%s' "$binds" | awk -F: '/\.cli-proxy-api|auths/ {print $1}' | head -n 1)"
   fi
-  if [ -z "${CPA_AUTH_DIR:-}" ]; then
-    CPA_AUTH_DIR="$(printf '%s' "$binds" | awk -F: '/\.cli-proxy-api/ {print $1}' | head -n 1)"
+  discovered_config_path="$(printf '%s' "$inspect" | awk -F' = ' '$2 ~ /config.yaml$/{print $2}' | head -n 1)"
+  if [ -z "$discovered_config_path" ]; then
+    discovered_config_path="$(printf '%s' "$binds" | awk -F: '/config.yaml/ {print $1}' | head -n 1)"
   fi
-  if [ -z "${CPA_CONFIG_PATH:-}" ]; then
-    CPA_CONFIG_PATH="$(printf '%s' "$inspect" | awk -F' = ' '$2 ~ /config.yaml$/{print $2}' | head -n 1)"
+  discovered_management_key="$(printf '%s' "$envs" | awk -F= '$1=="MANAGEMENT_PASSWORD"{print substr($0,index($0,"=")+1)}' | head -n 1)"
+  if printf '%s' "$envs" | grep -q '^PORT='; then
+    detected_port="$(printf '%s' "$envs" | awk -F= '$1=="PORT"{print $2}' | head -n 1)"
   fi
-  if [ -z "${CPA_CONFIG_PATH:-}" ]; then
-    CPA_CONFIG_PATH="$(printf '%s' "$binds" | awk -F: '/config.yaml/ {print $1}' | head -n 1)"
-  fi
-  if [ -z "${CPA_MANAGEMENT_KEY:-}" ]; then
-    CPA_MANAGEMENT_KEY="$(printf '%s' "$envs" | awk -F= '$1=="MANAGEMENT_PASSWORD"{print substr($0,index($0,"=")+1)}' | head -n 1)"
-  fi
-  if [ -z "${CPA_MANAGEMENT_URL:-}" ]; then
-    if printf '%s' "$envs" | grep -q '^PORT='; then
-      local detected_port
-      detected_port="$(printf '%s' "$envs" | awk -F= '$1=="PORT"{print $2}' | head -n 1)"
-      [ -n "$detected_port" ] && CPA_MANAGEMENT_URL="http://127.0.0.1:${detected_port}"
-    fi
+
+  [ -n "$discovered_auth_dir" ] && { CPA_AUTH_DIR="$discovered_auth_dir"; log "从容器挂载识别到账号目录: $CPA_AUTH_DIR"; }
+  [ -n "$discovered_config_path" ] && { CPA_CONFIG_PATH="$discovered_config_path"; log "从容器挂载识别到配置文件: $CPA_CONFIG_PATH"; }
+  [ -n "$discovered_management_key" ] && CPA_MANAGEMENT_KEY="$discovered_management_key"
+  if [ -n "$detected_port" ]; then
+    CPA_MANAGEMENT_URL="http://127.0.0.1:${detected_port}"
   fi
 
   detect_from_mount_directories "$inspect"
@@ -293,8 +290,8 @@ run_post_install_checks() {
   fi
 
   if [ -n "${CPA_MANAGEMENT_KEY:-}" ] && has_cmd curl; then
-    mgmt_code="$(http_get_code "$CPA_MANAGEMENT_URL/v0/management/auth-files/health" -H "Authorization: Bearer ${CPA_MANAGEMENT_KEY}")" || mgmt_code="000"
-    [ "$mgmt_code" = "200" ] || die "management API 自检失败: ${CPA_MANAGEMENT_URL}/v0/management/auth-files/health 返回 $mgmt_code，请检查管理地址或管理密码"
+    mgmt_code="$(http_get_code "$CPA_MANAGEMENT_URL/v0/management/auth-files" -H "Authorization: Bearer ${CPA_MANAGEMENT_KEY}")" || mgmt_code="000"
+    [ "$mgmt_code" = "200" ] || die "management API 自检失败: ${CPA_MANAGEMENT_URL}/v0/management/auth-files 返回 $mgmt_code，请检查管理地址或管理密码"
     log "自检: management API 可用 -> $CPA_MANAGEMENT_URL"
   fi
 
