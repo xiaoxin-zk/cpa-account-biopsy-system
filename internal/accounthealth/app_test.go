@@ -1,6 +1,11 @@
 package accounthealth
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,3 +135,58 @@ func TestClassifyProbeErrorUsageLimitReached(t *testing.T) {
 type testError string
 
 func (e testError) Error() string { return string(e) }
+
+func TestPasswordChangeInvalidatesOldToken(t *testing.T) {
+	tempDir := t.TempDir()
+	app := &App{authDir: tempDir, webToken: "oldpass1"}
+	h := app.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/report", nil)
+	req.Header.Set("Authorization", "Bearer oldpass1")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected old password to work before change, got %d", w.Code)
+	}
+
+	changeReq := httptest.NewRequest(http.MethodPost, "/api/settings/password", strings.NewReader(`{"password":"newpass2"}`))
+	changeReq.Header.Set("Authorization", "Bearer oldpass1")
+	changeReq.Header.Set("Content-Type", "application/json")
+	changeW := httptest.NewRecorder()
+	h.ServeHTTP(changeW, changeReq)
+	if changeW.Code != http.StatusOK {
+		t.Fatalf("expected password change success, got %d body=%s", changeW.Code, changeW.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(changeW.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected JSON response: %v", err)
+	}
+	if force, ok := payload["force_relogin"].(bool); !ok || !force {
+		t.Fatalf("expected force_relogin=true, got %#v", payload)
+	}
+
+	oldReq := httptest.NewRequest(http.MethodGet, "/api/report", nil)
+	oldReq.Header.Set("Authorization", "Bearer oldpass1")
+	oldW := httptest.NewRecorder()
+	h.ServeHTTP(oldW, oldReq)
+	if oldW.Code != http.StatusUnauthorized {
+		t.Fatalf("expected old password unauthorized after change, got %d", oldW.Code)
+	}
+
+	newReq := httptest.NewRequest(http.MethodGet, "/api/report", nil)
+	newReq.Header.Set("Authorization", "Bearer newpass2")
+	newW := httptest.NewRecorder()
+	h.ServeHTTP(newW, newReq)
+	if newW.Code != http.StatusOK {
+		t.Fatalf("expected new password to work after change, got %d", newW.Code)
+	}
+
+	settingsPath := filepath.Join(tempDir, ".account-health-settings.json")
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("expected settings file to exist: %v", err)
+	}
+	if !strings.Contains(string(raw), "newpass2") {
+		t.Fatalf("expected persisted new password, got %s", string(raw))
+	}
+}

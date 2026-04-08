@@ -198,7 +198,7 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "force_relogin": true})
 }
 
 func (a *App) handleBootstrapState(w http.ResponseWriter, r *http.Request) {
@@ -594,10 +594,12 @@ const indexHTML = `<!doctype html>
       const res = await fetch('/api/settings/password', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ password:value }) });
       const data = await res.json();
       if(!res.ok){ alert(data.error || '修改失败'); return; }
-      authToken = value.trim();
-      localStorage.setItem('account-health-token', authToken);
-      el('token').value = authToken;
-      alert('密码已修改并生效。');
+      localStorage.removeItem('account-health-token');
+      authToken = '';
+      el('token').value = '';
+      showApp(false);
+      el('loginMsg').textContent = '密码已修改，请使用新密码重新登录。';
+      alert('密码已修改，旧登录态已失效，请重新登录。');
     }
     el('refresh').onclick = () => load(false);
     el('probeNow').onclick = () => load(true);
