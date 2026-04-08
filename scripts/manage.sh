@@ -141,11 +141,26 @@ detect_from_container() {
   fi
 }
 
+detect_from_compose_files() {
+  local candidates="/opt /root /home"
+  local compose_file
+  for base in $candidates; do
+    while IFS= read -r -d '' compose_file; do
+      if [ -z "${CPA_AUTH_DIR:-}" ]; then
+        CPA_AUTH_DIR="$(grep -E '/root/.cli-proxy-api|/\.cli-proxy-api|auths' "$compose_file" 2>/dev/null | sed -E 's/^[[:space:]-]*([^:]+):.*/\1/' | head -n 1 || true)"
+      fi
+      if [ -z "${CPA_CONFIG_PATH:-}" ]; then
+        CPA_CONFIG_PATH="$(grep -E 'config.yaml' "$compose_file" 2>/dev/null | sed -E 's/^[[:space:]-]*([^:]+):.*/\1/' | head -n 1 || true)"
+      fi
+    done < <(find "$base" -maxdepth 4 \( -name docker-compose.yml -o -name compose.yml \) -print0 2>/dev/null)
+  done
+}
+
 detect_common_paths() {
-  for p in /root/.cli-proxy-api /opt/cliproxy/auths /opt/CLIProxyAPI/auths; do
+  for p in /root/.cli-proxy-api /opt/cliproxy/auths /opt/CLIProxyAPI/auths /opt/CLIProxyAPI/.cli-proxy-api /data/cli-proxy-api/auths /www/cli-proxy-api/auths; do
     if [ -z "${CPA_AUTH_DIR:-}" ] && [ -d "$p" ]; then CPA_AUTH_DIR="$p"; fi
   done
-  for p in /CLIProxyAPI/config.yaml /opt/cliproxy/config.yaml /opt/CLIProxyAPI/config.yaml; do
+  for p in /CLIProxyAPI/config.yaml /opt/cliproxy/config.yaml /opt/CLIProxyAPI/config.yaml /root/CLIProxyAPI/config.yaml /data/cli-proxy-api/config.yaml /www/cli-proxy-api/config.yaml; do
     if [ -z "${CPA_CONFIG_PATH:-}" ] && [ -f "$p" ]; then CPA_CONFIG_PATH="$p"; fi
   done
   if [ -z "${CPA_MANAGEMENT_URL:-}" ]; then
@@ -219,7 +234,17 @@ prepare_config() {
   local container_name
   container_name="$(detect_container_name)"
   detect_from_container "$container_name"
+  detect_from_compose_files
   detect_common_paths
+
+  if [ -n "${CPA_AUTH_DIR:-}" ] && [ ! -d "$CPA_AUTH_DIR" ]; then
+    log "已检测到旧的账号目录配置不可用：$CPA_AUTH_DIR"
+    CPA_AUTH_DIR=""
+  fi
+  if [ -n "${CPA_CONFIG_PATH:-}" ] && [ ! -f "$CPA_CONFIG_PATH" ]; then
+    log "已检测到旧的配置文件路径不可用：$CPA_CONFIG_PATH"
+    CPA_CONFIG_PATH=""
+  fi
 
   prompt_if_empty CPA_AUTH_DIR "未自动找到 CLIProxyAPI 的账号目录，请输入 auths 目录路径"
   prompt_if_empty CPA_CONFIG_PATH "未自动找到 CLIProxyAPI 的配置文件，请输入 config.yaml 路径"
