@@ -36,13 +36,22 @@ CPA Account Biopsy System 是一个独立部署的账号活检 sidecar，专门�
 - 主服务已启用 management API
 - 你已知道 management 密钥
 
-### 快速安装
+### 快速开始
 
-默认安装/更新命令：
+统一入口命令：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
 ```
+
+运行后会出现菜单：
+
+1. 安装
+2. 更新
+3. 卸载
+4. 重启服务
+5. 查看状态
+6. 退出
 
 脚本会自动尝试发现：
 
@@ -81,7 +90,7 @@ docker compose --env-file .env up -d --build
 
 ### 更新方式
 
-再次执行同一条安装命令即可完成更新。
+再次执行同一条统一入口命令，然后在菜单中选择 `更新`。
 
 也可以在安装目录中手动更新：
 
@@ -93,9 +102,7 @@ docker compose --env-file .env up -d --build
 
 ### 卸载方式
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/uninstall.sh)
-```
+再次执行同一条统一入口命令，然后在菜单中选择 `卸载`。
 
 ### 与主项目对接方式
 
@@ -161,13 +168,22 @@ It does not replace the main service. It runs as a separate Docker service and t
 - Management API enabled on the main service
 - Management password available
 
-### Quick Install
+### Quick Start
 
-Default install/update command:
+Unified entry command:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
 ```
+
+You will get a terminal menu with:
+
+1. Install
+2. Update
+3. Uninstall
+4. Restart service
+5. Show status
+6. Exit
 
 The installer will try to auto-detect:
 
@@ -206,7 +222,7 @@ docker compose --env-file .env up -d --build
 
 ### Update
 
-Run the same install command again to update.
+Run the same unified command again and choose `Update`.
 
 Or update manually:
 
@@ -218,9 +234,7 @@ docker compose --env-file .env up -d --build
 
 ### Uninstall
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/uninstall.sh)
-```
+Run the same unified command again and choose `Uninstall`.
 
 ### Integration with CLIProxyAPI
 
