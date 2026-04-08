@@ -127,10 +127,10 @@ prepare_config() {
   detect_from_container "$container_name"
   detect_common_paths
 
-  prompt_if_empty CPA_AUTH_DIR "未找到 CLIProxyAPI 的 auths 目录，请输入路径"
-  prompt_if_empty CPA_CONFIG_PATH "未找到 CLIProxyAPI 的 config.yaml，请输入路径"
-  prompt_if_empty CPA_MANAGEMENT_URL "未找到 CLIProxyAPI 管理地址，请输入（例如 http://127.0.0.1:8317）"
-  prompt_if_empty CPA_MANAGEMENT_KEY "未自动发现 MANAGEMENT_PASSWORD，请输入明文"
+  prompt_if_empty CPA_AUTH_DIR "未自动找到 CLIProxyAPI 的账号目录，请输入 auths 目录路径"
+  prompt_if_empty CPA_CONFIG_PATH "未自动找到 CLIProxyAPI 的配置文件，请输入 config.yaml 路径"
+  prompt_if_empty CPA_MANAGEMENT_URL "未自动获取到 CLIProxyAPI 管理地址，请输入管理地址（例如 http://127.0.0.1:8317）"
+  prompt_if_empty CPA_MANAGEMENT_KEY "未自动获取到 CLIProxyAPI 管理密码，请输入你的 CLIProxyAPI 管理密码"
 
   upsert_env CPA_AUTH_DIR "${CPA_AUTH_DIR:-}"
   upsert_env CPA_CONFIG_PATH "${CPA_CONFIG_PATH:-}"
