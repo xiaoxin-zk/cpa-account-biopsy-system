@@ -880,6 +880,10 @@ func (a *App) reconcileProbe(file authFile, decision actionDecision, probe probe
 		decision.EffectiveState = "quota"
 		decision.ShouldWrite = !file.Disabled || !boolMeta(file.Metadata, managedKey) || stringMeta(file.Metadata, managedReasonKey) != "quota" || !sameTime(decision.ManagedRetryAfter, timeMeta(file.Metadata, managedUntilKey))
 	default:
+		if probeIndicatesErrorState(probe) {
+			decision.EffectiveState = "error"
+			return decision
+		}
 		if decision.Disabled {
 			switch decision.ManagedReason {
 			case "blocked":
@@ -892,6 +896,20 @@ func (a *App) reconcileProbe(file authFile, decision actionDecision, probe probe
 		}
 	}
 	return decision
+}
+
+func probeIndicatesErrorState(probe probeResult) bool {
+	if probe.Status != "error" {
+		return false
+	}
+	if probe.HTTPStatus == http.StatusPaymentRequired {
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(probe.Message))
+	if strings.Contains(message, "deactivated_workspace") {
+		return true
+	}
+	return false
 }
 
 func (a *App) applyAction(file authFile, decision actionDecision) error {

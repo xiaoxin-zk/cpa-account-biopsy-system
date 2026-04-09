@@ -369,12 +369,14 @@ const indexHTML = `<!doctype html>
     let recentlyUpdated = new Set();
     function fmtTime(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d.getTime()) || d.getFullYear() <= 1) return '-'; return d.toLocaleString(); }
     function cls(s){ s=(s||'').toLowerCase(); if(['active','ok','recovered'].includes(s)) return 'active'; if(['quota'].includes(s)) return 'quota'; if(['blocked'].includes(s)) return 'blocked'; if(['cooling'].includes(s)) return 'cooling'; if(['unprobed'].includes(s)) return 'unprobed'; if(['disabled','error'].includes(s)) return s; return 'cooling'; }
-    function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
+    function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常/不可用',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
     function stateKind(x){
       if(x.probe_current === false) return 'unprobed';
       if(x.effective_state === 'blocked' || x.managed_reason === 'blocked' || x.probe_status === 'blocked') return 'blocked';
       if(x.probe_http_status === 401 && !x.probe_status && x.effective_state !== 'quota') return 'blocked';
       if(x.effective_state === 'quota' || x.managed_reason === 'quota' || x.probe_status === 'quota') return 'quota';
+      if(x.effective_state === 'error') return 'error';
+      if(x.probe_status === 'error' || x.probe_status === 'unsupported') return 'error';
       if(x.effective_state === 'active') return 'active';
       if(x.disabled) return 'disabled';
       return x.effective_state || 'unknown';
@@ -538,6 +540,10 @@ const indexHTML = `<!doctype html>
       if(kind === 'blocked') {
 	        return quotaReasonBox('401封禁，未返回额度');
       }
+	      if(kind === 'error') {
+	        if(x.probe_http_status === 402 || String(x.probe_message || '').includes('deactivated_workspace')) return quotaReasonBox('工作区不可用（402），当前不可正常使用');
+	        return quotaReasonBox('探测异常，当前状态不可确认');
+	      }
 	      if(!x.probe_status) return quotaReasonBox('未探测');
 	      if(x.probe_status === 'ok') return quotaReasonBox('已探测，未返回额度');
 	      if(x.probe_status === 'error' || x.probe_status === 'unsupported') return quotaReasonBox('探测失败');

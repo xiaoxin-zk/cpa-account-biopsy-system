@@ -195,6 +195,18 @@ func TestReconcileProbeBlockedWinsOverOK(t *testing.T) {
 	}
 }
 
+func TestReconcileProbeMarksDeactivatedWorkspaceAsError(t *testing.T) {
+	app := &App{}
+	decision := actionDecision{EffectiveState: "active"}
+	updated := app.reconcileProbe(authFile{}, decision, probeResult{Status: "error", HTTPStatus: http.StatusPaymentRequired, Message: `{"detail":{"code":"deactivated_workspace"}}`, CheckedAt: time.Now()}, time.Now())
+	if updated.EffectiveState != "error" {
+		t.Fatalf("expected deactivated workspace to map to error state, got %q", updated.EffectiveState)
+	}
+	if updated.Disabled {
+		t.Fatalf("expected deactivated workspace not to auto-disable account, got %+v", updated)
+	}
+}
+
 func TestClassifyProbeErrorUsageLimitReached(t *testing.T) {
 	err := strings.NewReader("")
 	_ = err
