@@ -21,6 +21,38 @@ run_cmd() {
   "$@"
 }
 
+repo_dirty_status() {
+  git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null || true
+}
+
+backup_dirty_patch() {
+  local backup_dir="$INSTALL_DIR/.cpa-local-backups"
+  local timestamp backup_file
+  timestamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s)"
+  backup_file="$backup_dir/dirty-worktree-${timestamp}.patch"
+  mkdir -p "$backup_dir"
+  git -C "$INSTALL_DIR" diff --binary > "$backup_file"
+  printf '%s' "$backup_file"
+}
+
+abort_dirty_update() {
+  local dirty backup_file
+  dirty="$(repo_dirty_status)"
+  [ -n "$dirty" ] || return 0
+  backup_file="$(backup_dirty_patch)"
+  log "检测到安装目录存在未提交的本地改动，已停止自动更新，避免覆盖服务器上的手工修改。"
+  while IFS= read -r line; do
+    [ -n "$line" ] && log "本地改动: $line"
+  done <<< "$dirty"
+  log "已导出当前本地改动补丁备份: $backup_file"
+  log "如果你确认这些改动已经包含在 GitHub 最新代码中，可先执行："
+  log "sudo git -c safe.directory=$INSTALL_DIR -C $INSTALL_DIR fetch origin $REPO_REF"
+  log "sudo git -c safe.directory=$INSTALL_DIR -C $INSTALL_DIR reset --hard origin/$REPO_REF"
+  log "然后重新运行统一更新命令。"
+  log "如果你不确认这些改动是否已入库，请先查看补丁备份文件，再决定是否覆盖。"
+  exit 1
+}
+
 http_get_code() {
   local url="$1"
   shift || true
@@ -322,6 +354,7 @@ run_post_install_checks() {
 bootstrap_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
     run_cmd git -C "$INSTALL_DIR" fetch --tags origin
+    abort_dirty_update
     run_cmd git -C "$INSTALL_DIR" checkout "$REPO_REF"
     run_cmd git -C "$INSTALL_DIR" pull --ff-only origin "$REPO_REF"
   else
