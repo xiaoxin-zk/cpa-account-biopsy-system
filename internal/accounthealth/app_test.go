@@ -89,6 +89,36 @@ func TestApplyWHAMUsageDetailsMarksQuotaWhenLimitReached(t *testing.T) {
 	}
 }
 
+func TestApplyWHAMUsageDetailsMarksQuotaWhenRemainingPercentIsZero(t *testing.T) {
+	result := &probeResult{Message: `{"email":"foo@example.com","plan_type":"free","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":100,"reset_after_seconds":100,"reset_at":1776260226},"secondary_window":null}}`}
+	applyWHAMUsageDetails(result)
+	if !result.QuotaLimited {
+		t.Fatal("expected exhausted quota window to mark quota limited even without explicit limit_reached")
+	}
+	if len(result.QuotaItems) != 1 || !result.QuotaItems[0].PercentKnown || result.QuotaItems[0].Percent != 0 {
+		t.Fatalf("expected exhausted weekly window, got %+v", result.QuotaItems)
+	}
+}
+
+func TestReconcileProbeQuotaWritesRetryAfterChanges(t *testing.T) {
+	app := &App{}
+	now := time.Now().UTC()
+	initialRetry := now.Add(30 * time.Minute).Truncate(time.Second)
+	newRetry := now.Add(2 * time.Hour).Truncate(time.Second)
+	file := authFile{Disabled: true, Metadata: map[string]any{managedKey: true, managedReasonKey: "quota", managedUntilKey: initialRetry.Format(time.RFC3339)}}
+	decision := actionDecision{Disabled: true, Managed: true, ManagedReason: "quota", ManagedRetryAfter: initialRetry, EffectiveState: "quota"}
+	updated := app.reconcileProbe(file, decision, probeResult{Status: "quota", ResetAt: newRetry, CheckedAt: now}, now)
+	if !updated.Disabled || !updated.Managed || updated.ManagedReason != "quota" {
+		t.Fatalf("expected quota-managed decision, got %+v", updated)
+	}
+	if !sameTime(updated.ManagedRetryAfter, newRetry) {
+		t.Fatalf("expected retry_after update to be kept, got %v want %v", updated.ManagedRetryAfter, newRetry)
+	}
+	if !updated.ShouldWrite {
+		t.Fatal("expected changed quota retry_after to trigger file write")
+	}
+}
+
 func TestApplyWHAMUsageDetailsUsesTeamWindowTitles(t *testing.T) {
 	result := &probeResult{Message: `{"email":"foo@example.com","plan_type":"team","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":40,"reset_after_seconds":100,"reset_at":1776260226},"secondary_window":{"used_percent":10,"reset_after_seconds":200,"reset_at":1776270226}},"code_review_rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":0,"reset_after_seconds":300,"reset_at":1776280226},"secondary_window":null}}`}
 	applyWHAMUsageDetails(result)

@@ -878,7 +878,7 @@ func (a *App) reconcileProbe(file authFile, decision actionDecision, probe probe
 			decision.ManagedRetryAfter = now.Add(30 * time.Minute)
 		}
 		decision.EffectiveState = "quota"
-		decision.ShouldWrite = !file.Disabled || !boolMeta(file.Metadata, managedKey)
+		decision.ShouldWrite = !file.Disabled || !boolMeta(file.Metadata, managedKey) || stringMeta(file.Metadata, managedReasonKey) != "quota" || !sameTime(decision.ManagedRetryAfter, timeMeta(file.Metadata, managedUntilKey))
 	default:
 		if decision.Disabled {
 			switch decision.ManagedReason {
@@ -1200,15 +1200,25 @@ func parseWHAMLimitWindows(limit map[string]any, primaryTitle, secondaryTitle st
 		}
 	}
 	items := make([]QuotaItem, 0, 2)
+	limitExhausted := false
 	if primary, ok := limit["primary_window"].(map[string]any); ok {
 		if item := makeWHAMQuotaItem(primary, primaryTitle); item.Title != "" {
 			items = append(items, item)
+			if item.PercentKnown && item.Percent == 0 {
+				limitExhausted = true
+			}
 		}
 	}
 	if secondary, ok := limit["secondary_window"].(map[string]any); ok {
 		if item := makeWHAMQuotaItem(secondary, secondaryTitle); item.Title != "" {
 			items = append(items, item)
+			if item.PercentKnown && item.Percent == 0 {
+				limitExhausted = true
+			}
 		}
+	}
+	if limitExhausted && result != nil {
+		result.QuotaLimited = true
 	}
 	return items
 }
