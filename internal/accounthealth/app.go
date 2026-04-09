@@ -259,6 +259,10 @@ func (a *App) applyCachedStatus(key string, result *actionDecision) {
 				result.ManagedRetryAfter = entry.CheckedAt
 			}
 		}
+	case "error":
+		if !result.Disabled && result.ManagedReason == "" {
+			result.EffectiveState = "error"
+		}
 	}
 }
 
@@ -711,6 +715,7 @@ func (a *App) inspectOne(ctx context.Context, file authFile, rt *runtimeHealth, 
 	summary.QuotaHint = quotaHint(summary)
 
 	result := a.decideAction(file, rt, now)
+	a.applyCachedStatus(cacheKey, &result)
 	if doProbe {
 		probe := a.probe(ctx, file)
 		summary.ProbeCurrent = true

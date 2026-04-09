@@ -207,6 +207,17 @@ func TestReconcileProbeMarksDeactivatedWorkspaceAsError(t *testing.T) {
 	}
 }
 
+func TestApplyCachedStatusPromotesErrorStateOnReportRefresh(t *testing.T) {
+	app := &App{probeCache: map[string]probeCacheEntry{
+		"foo@example.com": {Status: "error", HTTPStatus: http.StatusPaymentRequired, Message: `{"detail":{"code":"deactivated_workspace"}}`, CheckedAt: time.Now()},
+	}}
+	decision := actionDecision{EffectiveState: "active"}
+	app.applyCachedStatus("foo@example.com", &decision)
+	if decision.EffectiveState != "error" {
+		t.Fatalf("expected cached error status to keep report state as error, got %q", decision.EffectiveState)
+	}
+}
+
 func TestClassifyProbeErrorUsageLimitReached(t *testing.T) {
 	err := strings.NewReader("")
 	_ = err
