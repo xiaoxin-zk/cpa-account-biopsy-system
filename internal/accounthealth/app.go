@@ -50,6 +50,8 @@ type App struct {
 	reportFreshness  time.Duration
 	watchDebounce    time.Duration
 	requestTimeout   time.Duration
+	probeTimeout     time.Duration
+	probeConcurrency int
 	shutdownTimeout  time.Duration
 	authDir          string
 	configPath       string
@@ -121,6 +123,7 @@ type QuotaItem struct {
 	Percent      int    `json:"percent,omitempty"`
 	PercentKnown bool   `json:"percent_known,omitempty"`
 	ResetAt      string `json:"reset_at,omitempty"`
+	Stale        bool   `json:"stale,omitempty"`
 }
 
 type KVPair struct {
@@ -228,12 +231,9 @@ func (a *App) applyProbeCache(key string, summary *AuthSummary) {
 	if summary.PlanType == "" {
 		summary.PlanType = entry.PlanType
 	}
-	if len(summary.QuotaItems) == 0 && len(entry.QuotaItems) > 0 {
-		summary.QuotaItems = entry.QuotaItems
-		summary.QuotaTitle = entry.QuotaTitle
-		summary.QuotaPercent = entry.QuotaPercent
-		summary.QuotaPercentKnown = entry.QuotaKnown
-		summary.QuotaResetAt = entry.QuotaResetAt
+	if len(entry.QuotaItems) > 0 {
+		summary.QuotaItems = mergeQuotaItems(summary.QuotaItems, entry.QuotaItems, false)
+		applyQuotaSnapshot(summary, summary.QuotaItems)
 	}
 }
 
@@ -279,16 +279,10 @@ func (a *App) mergeProbeIntoSummary(key string, probe probeResult, summary *Auth
 	if summary.PlanType == "" && strings.TrimSpace(probe.PlanType) != "" {
 		summary.PlanType = strings.TrimSpace(probe.PlanType)
 	}
-	quotaItems := probe.QuotaItems
-	if len(quotaItems) == 0 {
-		quotaItems = previous.QuotaItems
-	}
+	quotaItems := mergeQuotaItems(summary.QuotaItems, probe.QuotaItems, true)
 	if len(quotaItems) > 0 {
 		summary.QuotaItems = quotaItems
-		summary.QuotaTitle = quotaItems[0].Title
-		summary.QuotaPercent = quotaItems[0].Percent
-		summary.QuotaPercentKnown = quotaItems[0].PercentKnown
-		summary.QuotaResetAt = quotaItems[0].ResetAt
+		applyQuotaSnapshot(summary, quotaItems)
 	}
 	if a != nil && strings.TrimSpace(key) != "" {
 		entry := probeCacheEntry{
@@ -306,9 +300,107 @@ func (a *App) mergeProbeIntoSummary(key string, probe probeResult, summary *Auth
 			entry.QuotaResetAt = quotaItems[0].ResetAt
 		}
 		a.mu.Lock()
+		if a.probeCache == nil {
+			a.probeCache = make(map[string]probeCacheEntry)
+		}
 		a.probeCache[key] = entry
 		a.mu.Unlock()
 	}
+}
+
+func applyQuotaSnapshot(summary *AuthSummary, items []QuotaItem) {
+	if summary == nil {
+		return
+	}
+	summary.QuotaTitle = ""
+	summary.QuotaPercent = 0
+	summary.QuotaPercentKnown = false
+	summary.QuotaResetAt = ""
+	if len(items) == 0 {
+		return
+	}
+	primary := items[0]
+	summary.QuotaTitle = primary.Title
+	summary.QuotaPercent = primary.Percent
+	summary.QuotaPercentKnown = primary.PercentKnown
+	summary.QuotaResetAt = primary.ResetAt
+}
+
+func mergeQuotaItems(existing []QuotaItem, latest []QuotaItem, markPreservedStale bool) []QuotaItem {
+	if len(existing) == 0 && len(latest) == 0 {
+		return nil
+	}
+	if len(latest) == 0 {
+		return markQuotaItemsStale(existing, markPreservedStale)
+	}
+	existingByTitle := make(map[string]QuotaItem, len(existing))
+	for _, item := range existing {
+		title := normalizeQuotaTitle(item.Title)
+		if title == "" {
+			continue
+		}
+		existingByTitle[title] = item
+	}
+	seen := make(map[string]struct{}, len(latest))
+	out := make([]QuotaItem, 0, len(latest)+len(existing))
+	for _, item := range latest {
+		title := normalizeQuotaTitle(item.Title)
+		if title == "" {
+			continue
+		}
+		merged := item
+		if prev, ok := existingByTitle[title]; ok {
+			if !merged.PercentKnown && prev.PercentKnown {
+				merged.Percent = prev.Percent
+				merged.PercentKnown = true
+				merged.Stale = markPreservedStale
+			}
+			if strings.TrimSpace(merged.ResetAt) == "" && strings.TrimSpace(prev.ResetAt) != "" {
+				merged.ResetAt = prev.ResetAt
+				merged.Stale = markPreservedStale || merged.Stale
+			}
+		}
+		out = append(out, merged)
+		seen[title] = struct{}{}
+	}
+	for _, item := range existing {
+		title := normalizeQuotaTitle(item.Title)
+		if title == "" {
+			continue
+		}
+		if _, ok := seen[title]; ok {
+			continue
+		}
+		if !quotaItemHasDisplayData(item) {
+			continue
+		}
+		item.Stale = markPreservedStale || item.Stale
+		out = append(out, item)
+	}
+	return compactQuotaItems(out)
+}
+
+func markQuotaItemsStale(items []QuotaItem, stale bool) []QuotaItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]QuotaItem, 0, len(items))
+	for _, item := range items {
+		if !quotaItemHasDisplayData(item) && strings.TrimSpace(item.Title) == "" {
+			continue
+		}
+		item.Stale = stale || item.Stale
+		out = append(out, item)
+	}
+	return compactQuotaItems(out)
+}
+
+func quotaItemHasDisplayData(item QuotaItem) bool {
+	return item.PercentKnown || strings.TrimSpace(item.ResetAt) != ""
+}
+
+func normalizeQuotaTitle(title string) string {
+	return strings.ToLower(strings.TrimSpace(title))
 }
 
 type runtimeHealthMaps struct {
@@ -334,6 +426,8 @@ func NewAppFromEnv() (*App, error) {
 	reportFreshness := parseDurationEnv("AH_REPORT_FRESHNESS", defaultReportFreshness)
 	watchDebounce := parseDurationEnv("AH_WATCH_DEBOUNCE", defaultWatchDebounce)
 	requestTimeout := parseDurationEnv("AH_REQUEST_TIMEOUT", defaultRequestTimeout)
+	probeTimeout := parseDurationEnv("AH_PROBE_TIMEOUT", 5*time.Second)
+	probeConcurrency := parseIntEnv("AH_PROBE_CONCURRENCY", 16)
 	shutdownTimeout := parseDurationEnv("AH_SHUTDOWN_TIMEOUT", defaultShutdownTimeout)
 	webToken := strings.TrimSpace(os.Getenv("AH_WEB_TOKEN"))
 
@@ -344,6 +438,8 @@ func NewAppFromEnv() (*App, error) {
 		reportFreshness:  reportFreshness,
 		watchDebounce:    watchDebounce,
 		requestTimeout:   requestTimeout,
+		probeTimeout:     probeTimeout,
+		probeConcurrency: probeConcurrency,
 		shutdownTimeout:  shutdownTimeout,
 		authDir:          authDir,
 		configPath:       configPath,
@@ -456,22 +552,77 @@ func (a *App) refresh(ctx context.Context, doProbe bool) Report {
 	runtimeMaps := a.fetchRuntimeHealth(ctx)
 	usageByIndex := a.fetchUsage(ctx)
 	report := Report{GeneratedAt: time.Now().UTC(), Auths: make([]AuthSummary, 0, len(files))}
-	for _, file := range files {
-		rt := runtimeMaps.ByID[file.ID]
-		if rt == nil && file.Name != "" {
-			rt = runtimeMaps.ByFile[file.Name]
+	if !doProbe {
+		for _, file := range files {
+			rt := runtimeMaps.ByID[file.ID]
+			if rt == nil && file.Name != "" {
+				rt = runtimeMaps.ByFile[file.Name]
+			}
+			if rt == nil {
+				authIndex := strings.TrimSpace(anyString(file.Metadata["auth_index"]))
+				if authIndex != "" {
+					rt = runtimeMaps.ByAuthIndex[authIndex]
+				}
+			}
+			report.Auths = append(report.Auths, a.inspectOne(ctx, file, rt, usageByIndex, false))
 		}
-		if rt == nil {
-			authIndex := strings.TrimSpace(anyString(file.Metadata["auth_index"]))
-			if authIndex != "" {
-				rt = runtimeMaps.ByAuthIndex[authIndex]
+	} else {
+		type job struct {
+			idx  int
+			file authFile
+		}
+		type resultItem struct {
+			idx     int
+			summary AuthSummary
+		}
+		workers := a.probeConcurrency
+		if workers <= 0 {
+			workers = 16
+		}
+		jobs := make(chan job)
+		results := make(chan resultItem, len(files))
+		var wg sync.WaitGroup
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := range jobs {
+					rt := runtimeMaps.ByID[j.file.ID]
+					if rt == nil && j.file.Name != "" {
+						rt = runtimeMaps.ByFile[j.file.Name]
+					}
+					if rt == nil {
+						authIndex := strings.TrimSpace(anyString(j.file.Metadata["auth_index"]))
+						if authIndex != "" {
+							rt = runtimeMaps.ByAuthIndex[authIndex]
+						}
+					}
+					probeCtx, cancel := context.WithTimeout(ctx, a.probeTimeout)
+					summary := a.inspectOne(probeCtx, j.file, rt, usageByIndex, true)
+					cancel()
+					results <- resultItem{idx: j.idx, summary: summary}
+				}
+			}()
+		}
+		go func() {
+			for idx, file := range files {
+				jobs <- job{idx: idx, file: file}
+			}
+			close(jobs)
+			wg.Wait()
+			close(results)
+		}()
+		ordered := make([]AuthSummary, len(files))
+		processed := 0
+		for item := range results {
+			ordered[item.idx] = item.summary
+			processed++
+			log.Printf("account-health probe result email=%s state=%s probe_status=%s managed_reason=%s", item.summary.Email, item.summary.EffectiveState, item.summary.ProbeStatus, item.summary.ManagedReason)
+			if processed%25 == 0 || processed == len(files) {
+				log.Printf("account-health probe progress %d/%d", processed, len(files))
 			}
 		}
-		summary := a.inspectOne(ctx, file, rt, usageByIndex, doProbe)
-		if doProbe {
-			log.Printf("account-health probe result email=%s state=%s probe_status=%s managed_reason=%s", summary.Email, summary.EffectiveState, summary.ProbeStatus, summary.ManagedReason)
-		}
-		report.Auths = append(report.Auths, summary)
+		report.Auths = append(report.Auths, ordered...)
 	}
 	sort.Slice(report.Auths, func(i, j int) bool {
 		if report.Auths[i].Provider != report.Auths[j].Provider {
@@ -1361,6 +1512,18 @@ func parseDurationEnv(name string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func parseIntEnv(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed <= 0 {
 		return fallback
 	}
