@@ -483,6 +483,7 @@ const indexHTML = `<!doctype html>
       options = options || {};
       const neutral = !!options.neutral;
       const exhausted = !!options.exhausted;
+      const stale = item.stale === true;
       const hasPercentField = item.percent !== undefined && item.percent !== null && item.percent !== '';
       const known = item.percent_known === true;
       const hasReset = !!(item.reset_at && String(item.reset_at).trim());
@@ -490,18 +491,22 @@ const indexHTML = `<!doctype html>
       const visual = quotaVisual(value);
       const color = neutral ? '#475569' : (exhausted ? '#64748b' : visual.color);
       const title = item.title || '额度';
-      const reset = hasReset ? '<div class="small">'+item.reset_at+'</div>' : '';
+      const details = [];
+      if(hasReset) details.push('<div class="small">'+item.reset_at+'</div>');
+      if(stale) details.push('<div class="small">本次未返回，保留上次额度快照</div>');
       let text = '';
       if (known) {
         text = exhausted && value === 0 ? (hasReset ? '等待重置' : '已耗尽') : visual.text;
       } else if (hasReset) {
-        text = exhausted ? '等待重置' : '已采集';
+        text = exhausted ? '等待重置' : (stale ? '上次快照' : '已采集');
+      } else if (stale) {
+        text = '上次快照';
       } else if (neutral) {
         text = '未采集';
       } else {
         text = '额度耗尽';
       }
-      return '<div class="quota-mini"><div class="quota-mini-top"><span class="label">'+title+'</span><span class="value">'+text+'</span></div>'+(reset?reset:'')+'<div class="meter"><span style="width:'+value+'%;background:'+color+'"></span></div></div>';
+      return '<div class="quota-mini"><div class="quota-mini-top"><span class="label">'+title+'</span><span class="value">'+text+'</span></div>'+(details.length?details.join(''):'')+'<div class="meter"><span style="width:'+value+'%;background:'+color+'"></span></div></div>';
     }
     function fallbackQuotaItems(x){
       const plan = (x.plan_type || '').toLowerCase();
@@ -515,8 +520,8 @@ const indexHTML = `<!doctype html>
     function quotaBoxes(x){
       const kind = stateKind(x);
       if(Array.isArray(x.quota_items) && x.quota_items.length > 0){
-        const relevant = x.quota_items.filter(item => item && (item.percent_known === true || !!(item.reset_at && String(item.reset_at).trim())));
-        const rendered = relevant.map(item => quotaItemBox(item, { neutral:false, exhausted:((item.percent_known === true && Number(item.percent || 0) <= 0) || (!(item.percent_known === true) && !!item.reset_at && kind === 'quota')) })).filter(Boolean).join('');
+        const relevant = x.quota_items.filter(item => item && ((item.percent_known === true) || !!(item.reset_at && String(item.reset_at).trim()) || item.stale === true || !!(item.title && String(item.title).trim())));
+        const rendered = relevant.map(item => quotaItemBox(item, { neutral:!(item.percent_known === true || !!(item.reset_at && String(item.reset_at).trim())), exhausted:((item.percent_known === true && Number(item.percent || 0) <= 0) || (!(item.percent_known === true) && !!item.reset_at && kind === 'quota')) })).filter(Boolean).join('');
         if(rendered) return '<div class="quota-stack">'+rendered+'</div>';
       }
       if(x.quota_percent_known){

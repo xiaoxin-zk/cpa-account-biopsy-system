@@ -106,6 +106,53 @@ func TestApplyWHAMUsageDetailsUsesTeamWindowTitles(t *testing.T) {
 	}
 }
 
+func TestMergeProbeIntoSummaryKeepsHistoricalQuotaWindows(t *testing.T) {
+	app := &App{}
+	summary := &AuthSummary{
+		QuotaItems: []QuotaItem{
+			{Title: "5小时限额", Percent: 60, PercentKnown: true, ResetAt: "04/10 12:00"},
+			{Title: "周限额", Percent: 90, PercentKnown: true, ResetAt: "04/12 12:00"},
+			{Title: "代码审查周限额", Percent: 100, PercentKnown: true, ResetAt: "04/13 12:00"},
+		},
+	}
+	app.mergeProbeIntoSummary("foo@example.com", probeResult{
+		Status:    "ok",
+		CheckedAt: time.Now(),
+		QuotaItems: []QuotaItem{
+			{Title: "5小时限额", Percent: 58, PercentKnown: true, ResetAt: "04/10 13:00"},
+		},
+	}, summary)
+	if len(summary.QuotaItems) != 3 {
+		t.Fatalf("expected historical windows to be preserved, got %+v", summary.QuotaItems)
+	}
+	if summary.QuotaItems[0].Title != "5小时限额" || summary.QuotaItems[0].Percent != 58 || summary.QuotaItems[0].Stale {
+		t.Fatalf("expected fresh primary window, got %+v", summary.QuotaItems[0])
+	}
+	if summary.QuotaItems[1].Title != "周限额" || !summary.QuotaItems[1].Stale || summary.QuotaItems[1].Percent != 90 {
+		t.Fatalf("expected preserved weekly window to remain stale, got %+v", summary.QuotaItems[1])
+	}
+	if summary.QuotaItems[2].Title != "代码审查周限额" || !summary.QuotaItems[2].Stale {
+		t.Fatalf("expected preserved review window to remain stale, got %+v", summary.QuotaItems[2])
+	}
+}
+
+func TestMergeProbeIntoSummaryRetainsPreviousQuotaSnapshotWhenProbeReturnsNone(t *testing.T) {
+	app := &App{}
+	summary := &AuthSummary{
+		QuotaItems: []QuotaItem{{Title: "周限额", Percent: 14, PercentKnown: true, ResetAt: "04/10 18:00"}},
+	}
+	app.mergeProbeIntoSummary("foo@example.com", probeResult{Status: "ok", CheckedAt: time.Now()}, summary)
+	if len(summary.QuotaItems) != 1 {
+		t.Fatalf("expected previous quota snapshot to remain, got %+v", summary.QuotaItems)
+	}
+	if !summary.QuotaItems[0].Stale {
+		t.Fatalf("expected preserved item to be marked stale, got %+v", summary.QuotaItems[0])
+	}
+	if summary.QuotaPercent != 14 || !summary.QuotaPercentKnown || summary.QuotaResetAt != "04/10 18:00" {
+		t.Fatalf("expected summary quota snapshot to remain populated, got %+v", summary)
+	}
+}
+
 func TestReconcileProbeBlockedWinsOverOK(t *testing.T) {
 	app := &App{}
 	decision := actionDecision{Disabled: true, Managed: true, ManagedReason: "blocked", EffectiveState: "blocked"}
