@@ -25,6 +25,23 @@ CPA Account Biopsy System 是一个独立部署的账号活检 sidecar，专门�
 - 支持独立 Web 密码
 - 支持自动快照刷新和低频探测
 
+### 当前状态
+
+- 当前仓库已可独立部署、更新和卸载
+- 当前重点仍然是提升服务器探测可信度、额度状态判定和可维护性
+- 欢迎社区参与修复、测试、文档整理和体验改进
+
+### 参与共建
+
+欢迎所有开发者通过 Issue 和 Pull Request 一起参与共建这个项目。
+
+- 贡献说明：[`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- 行为准则：[`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
+- 安全问题：[`SECURITY.md`](./SECURITY.md)
+- 项目路线图：[`ROADMAP.md`](./ROADMAP.md)
+
+如果你是第一次参与，建议优先从文档、测试、错误提示、前端状态说明和脚本健壮性改进开始。
+
 ### 页面说明
 
 - 浏览器标题：`CPA账号活检系统`
@@ -91,6 +108,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biops
 docker compose --env-file .env up -d --build
 ```
 
+### 目录结构
+
+- `cmd/cpa-account-biopsy-system/`: 程序入口
+- `internal/accounthealth/`: 核心后端逻辑与内嵌页面
+- `scripts/manage.sh`: 安装、更新、卸载、重启统一入口
+- `docker-compose.yml`: 本地/服务器部署编排
+- `README.md`: 项目说明
+
 ### 更新方式
 
 再次执行同一条统一入口命令，然后在菜单中选择 `更新`。
@@ -144,6 +169,17 @@ curl http://127.0.0.1:18317/healthz
 - `.env` 默认不应提交
 - sidecar 页面建议设置独立密码
 
+### 协作入口
+
+- 报告 Bug：使用 GitHub Bug Report 模板
+- 提功能建议：使用 GitHub Feature Request 模板
+- 提交代码：Fork 仓库并发起 Pull Request
+- 寻找可参与任务：查看 `ROADMAP.md` 中的 `Good First Issue` 和 `Help Wanted`
+
+### 开源协议
+
+本项目当前仓库附带 `MIT` 协议文件，参与贡献前请先阅读仓库中的 [`LICENSE`](./LICENSE)。
+
 ---
 
 ## English
@@ -167,6 +203,23 @@ It does not replace the main service. It runs as a separate Docker service and t
 - Manual enable / disable / delete actions
 - Independent dashboard password
 - Automatic snapshot refresh and low-frequency probing
+
+### Project Status
+
+- The project is deployable today as a standalone sidecar
+- Current work is focused on probe correctness, quota-state handling, and safer maintenance flows
+- Community contributions are welcome for code, tests, docs, UI clarity, and deployment experience
+
+### Contributing
+
+Everyone is welcome to help build this project.
+
+- Contribution guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
+- Security reporting: [`SECURITY.md`](./SECURITY.md)
+- Roadmap: [`ROADMAP.md`](./ROADMAP.md)
+
+If you are looking for a first contribution, docs, tests, issue reproduction, and UX clarity improvements are great starting points.
 
 ### UI Branding
 
@@ -234,6 +287,14 @@ You can also run it manually after installation:
 docker compose --env-file .env up -d --build
 ```
 
+### Repository Layout
+
+- `cmd/cpa-account-biopsy-system/`: application entrypoint
+- `internal/accounthealth/`: backend logic and embedded dashboard page
+- `scripts/manage.sh`: unified install/update/uninstall/restart entrypoint
+- `docker-compose.yml`: deployment definition
+- `README.md`: project overview and usage
+
 ### Update
 
 Run the same unified command again and choose `Update`.
@@ -286,6 +347,17 @@ This is expected security behavior. Once the Web management password is changed,
 - Do not commit real auth files, tokens, or management keys
 - `.env` should not be committed
 - Use a dedicated dashboard password
+
+### Collaboration Entry Points
+
+- Report bugs with the GitHub Bug Report template
+- Suggest improvements with the Feature Request template
+- Contribute code through a fork and Pull Request
+- Check `ROADMAP.md` for `Good First Issue` and `Help Wanted` style work
+
+### License
+
+This repository currently includes an `MIT` license file. Please read [`LICENSE`](./LICENSE) before contributing or redistributing the project.
 
 ---
 
