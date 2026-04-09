@@ -11,6 +11,10 @@ CPA Account Biopsy System 是一个独立部署的账号活检 sidecar，专门�
 
 它不会替换主项目，不会覆盖主项目原有安装方式，而是作为一个旁路 Docker 服务通过 management API 与主项目协作。
 
+### 友情链接
+
+- [Linux.do](https://linux.do/)
+
 ### 功能说明
 
 - 展示账号池整体健康度
@@ -149,6 +153,10 @@ curl http://127.0.0.1:18317/healthz
 CPA Account Biopsy System is a standalone sidecar service for CLIProxyAPI. It provides account health inspection, quota window visualization, status aggregation, manual enable/disable actions, and an independent Web dashboard.
 
 It does not replace the main service. It runs as a separate Docker service and talks to CLIProxyAPI through the management API.
+
+### Friend Link
+
+- [Linux.do](https://linux.do/)
 
 ### Features
 
