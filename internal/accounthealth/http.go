@@ -2,6 +2,7 @@ package accounthealth
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -90,6 +91,7 @@ func (a *App) handleRun(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	log.Printf("account-health manual probe requested remote=%s", r.RemoteAddr)
 	report := a.refresh(r.Context(), true)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "report": report})
@@ -604,14 +606,15 @@ const indexHTML = `<!doctype html>
       let toBlocked = 0, toQuota = 0, toActive = 0;
       for(const item of (afterItems || [])){
         const prev = beforeMap.get(item.file_name);
-        const prevKey = prev ? [prev.effective_state, prev.probe_status, prev.managed_reason].join('|') : '';
-        const nextKey = [item.effective_state, item.probe_status, item.managed_reason].join('|');
+        const prevKind = prev ? stateKind(prev) : 'unknown';
+        const nextKind = stateKind(item);
+        const prevKey = prev ? [prevKind, prev.probe_status, prev.managed_reason].join('|') : '';
+        const nextKey = [nextKind, item.probe_status, item.managed_reason].join('|');
         if(!prev || prevKey !== nextKey){
           changed.push(item.file_name);
-          const kind = stateKind(item);
-          if(kind === 'blocked') toBlocked++;
-          if(kind === 'quota') toQuota++;
-          if(kind === 'active') toActive++;
+          if(nextKind === 'blocked') toBlocked++;
+          if(nextKind === 'quota') toQuota++;
+          if(nextKind === 'active' && prevKind !== 'active' && prevKind !== 'unprobed') toActive++;
         }
       }
       return { changed, toBlocked, toQuota, toActive };

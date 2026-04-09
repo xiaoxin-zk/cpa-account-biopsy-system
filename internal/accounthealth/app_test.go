@@ -1,6 +1,7 @@
 package accounthealth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -188,5 +189,43 @@ func TestPasswordChangeInvalidatesOldToken(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "newpass2") {
 		t.Fatalf("expected persisted new password, got %s", string(raw))
+	}
+}
+
+func TestBootstrapStateIncludesAuthCountAndLastError(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "one.json"), []byte(`{"type":"codex","email":"one@example.com"}`), 0o600); err != nil {
+		t.Fatalf("expected auth file to be written: %v", err)
+	}
+	app := &App{authDir: tempDir, webToken: "secret12"}
+	app.refresh(context.Background(), false)
+	h := app.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/bootstrap-state", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected bootstrap state success, got %d", w.Code)
+	}
+	var payload struct {
+		Initialized bool      `json:"initialized"`
+		AuthCount   int       `json:"auth_count"`
+		LastError   string    `json:"last_error"`
+		LastRunAt   time.Time `json:"last_run_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected JSON response: %v", err)
+	}
+	if !payload.Initialized {
+		t.Fatal("expected initialized=true")
+	}
+	if payload.AuthCount != 1 {
+		t.Fatalf("expected auth_count=1, got %d", payload.AuthCount)
+	}
+	if payload.LastError != "" {
+		t.Fatalf("expected empty last_error, got %q", payload.LastError)
+	}
+	if payload.LastRunAt.IsZero() {
+		t.Fatal("expected last_run_at to be populated")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -444,6 +445,9 @@ func (a *App) ensureFreshReport(ctx context.Context) {
 }
 
 func (a *App) refresh(ctx context.Context, doProbe bool) Report {
+	if doProbe {
+		log.Printf("account-health probe started")
+	}
 	files, err := a.loadAuthFiles()
 	if err != nil {
 		a.setError(err.Error(), doProbe)
@@ -464,6 +468,9 @@ func (a *App) refresh(ctx context.Context, doProbe bool) Report {
 			}
 		}
 		summary := a.inspectOne(ctx, file, rt, usageByIndex, doProbe)
+		if doProbe {
+			log.Printf("account-health probe result email=%s state=%s probe_status=%s managed_reason=%s", summary.Email, summary.EffectiveState, summary.ProbeStatus, summary.ManagedReason)
+		}
 		report.Auths = append(report.Auths, summary)
 	}
 	sort.Slice(report.Auths, func(i, j int) bool {
@@ -481,6 +488,9 @@ func (a *App) refresh(ctx context.Context, doProbe bool) Report {
 		a.hasProbed = true
 	}
 	a.mu.Unlock()
+	if doProbe {
+		log.Printf("account-health probe finished accounts=%d", len(report.Auths))
+	}
 	return report
 }
 
@@ -721,6 +731,8 @@ func (a *App) reconcileProbe(file authFile, decision actionDecision, probe probe
 	default:
 		if decision.Disabled {
 			switch decision.ManagedReason {
+			case "blocked":
+				decision.EffectiveState = "blocked"
 			case "quota":
 				decision.EffectiveState = "quota"
 			default:
