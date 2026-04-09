@@ -1241,11 +1241,17 @@ func (a *App) fetchRuntimeHealth(ctx context.Context) runtimeHealthMaps {
 		Auths []map[string]any `json:"auths"`
 	}
 	if err := a.managementGet(ctx, "/v0/management/auth-files/health", &payload); err != nil {
-		return runtimeHealthMaps{ByID: byID, ByFile: byFile, ByAuthIndex: byAuthIndex}
+		var fallback struct {
+			Files []map[string]any `json:"files"`
+		}
+		if err2 := a.managementGet(ctx, "/v0/management/auth-files", &fallback); err2 != nil {
+			return runtimeHealthMaps{ByID: byID, ByFile: byFile, ByAuthIndex: byAuthIndex}
+		}
+		payload.Auths = fallback.Files
 	}
 	for _, item := range payload.Auths {
 		rt := &runtimeHealth{
-			ID:                      strings.TrimSpace(anyString(item["id"])),
+			ID:                      firstNonEmpty(strings.TrimSpace(anyString(item["id"])), strings.TrimSpace(anyString(item["name"]))),
 			FileName:                strings.TrimSpace(anyString(item["name"])),
 			Provider:                strings.TrimSpace(anyString(item["provider"])),
 			Email:                   strings.TrimSpace(anyString(item["email"])),
