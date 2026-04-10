@@ -470,6 +470,15 @@ const indexHTML = `<!doctype html>
       return '<div class="quota-box"><div class="quota-head"><div class="small">'+info.label+'</div><div class="quota-value">'+(info.text || '')+'</div></div><div class="meter"><span style="width:'+info.value+'%;background:'+info.color+'"></span></div></div>';
     }
     function authHeaders(){ return authToken ? { Authorization: 'Bearer ' + authToken } : {}; }
+    function withNoCache(url){
+      const sep = url.indexOf('?') >= 0 ? '&' : '?';
+      return url + sep + '_ts=' + Date.now();
+    }
+    async function fetchJSON(url, options){
+      const res = await fetch(withNoCache(url), Object.assign({ cache:'no-store' }, options || {}));
+      const data = await res.json();
+      return { res, data };
+    }
     function showApp(ready){ el('loginBox').classList.toggle('hidden', ready); el('appBox').classList.toggle('hidden', !ready); }
     function renderLoginStatus(data){
       const authCount = Number(data && data.auth_count || 0);
@@ -743,10 +752,10 @@ const indexHTML = `<!doctype html>
       files = (files || []).filter(Boolean);
       if(!files.length){ alert('请先选择账号'); return; }
       if(!confirm('确认要'+textMap[action]+' '+files.length+' 个账号吗？')) return;
-      const res = await fetch('/api/auth/action', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ file_names:files, action }) });
-      const data = await res.json();
+      const { res, data } = await fetchJSON('/api/auth/action', { method:'POST', headers: { 'Content-Type':'application/json', ...authHeaders() }, body: JSON.stringify({ file_names:files, action }) });
       if(!res.ok){ alert(data.error || '操作失败'); return; }
       files.forEach(file => selected.delete(file));
+      currentReport = data.report || currentReport;
       current = (data.report && data.report.auths) || current;
       cards(current); rows(current);
     }
@@ -775,15 +784,21 @@ const indexHTML = `<!doctype html>
       el('probeSummary').classList.toggle('hidden', !text);
     }
     async function load(run){
-      const url = run ? '/api/run' : '/api/report';
       const before = current.slice();
       el('meta').textContent = run ? '正在执行活检...' : '正在刷新快照...';
       const probeBtn = el('probeNow');
       if(run){ probeBtn.disabled = true; probeBtn.textContent = '活检中...'; setProbeSummary('活检正在执行，请稍候...'); }
       try {
-        const res = await fetch(url, { method: run ? 'POST' : 'GET', headers: authHeaders() });
-        if(res.status === 401){ showApp(false); el('loginMsg').textContent = '口令错误或未登录'; return; }
-        const data = await res.json();
+        const initial = run
+          ? await fetchJSON('/api/run', { method:'POST', headers: authHeaders() })
+          : await fetchJSON('/api/report', { method:'GET', headers: authHeaders() });
+        if(initial.res.status === 401){ showApp(false); el('loginMsg').textContent = '口令错误或未登录'; return; }
+        let data = initial.data || {};
+        if(run){
+          const latest = await fetchJSON('/api/report', { method:'GET', headers: authHeaders() });
+          if(latest.res.status === 401){ showApp(false); el('loginMsg').textContent = '口令错误或未登录'; return; }
+          data = latest.data || data;
+        }
         const report = data.report || {};
         currentReport = report;
         current = report.auths || [];
