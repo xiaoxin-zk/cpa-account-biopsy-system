@@ -416,6 +416,16 @@ const indexHTML = `<!doctype html>
       if(x.disabled) return 'disabled';
       return x.effective_state || 'unknown';
     }
+    function overviewStateKind(x){
+      if(x.effective_state === 'blocked' || x.managed_reason === 'blocked' || x.probe_status === 'blocked') return 'blocked';
+      if(x.probe_http_status === 401 && !x.probe_status && x.effective_state !== 'quota') return 'blocked';
+      if(x.effective_state === 'quota' || x.managed_reason === 'quota' || x.probe_status === 'quota') return 'quota';
+      if(x.disabled) return 'disabled';
+      if(x.effective_state === 'error' || x.probe_status === 'error' || x.probe_status === 'unsupported') return 'error';
+      if(x.effective_state === 'active') return 'active';
+      if(x.effective_state) return x.effective_state;
+      return 'unknown';
+    }
     function meterInfo(x){
       const kind = stateKind(x);
       if(kind === 'blocked') return { label:'额度状态: 401封禁', value:100, color:'#ef4444', exact:false };
@@ -521,10 +531,10 @@ const indexHTML = `<!doctype html>
     }
     function overviewPanel(items){
       const total = items.length;
-      const active = items.filter(x => stateKind(x) === 'active').length;
-      const blocked = items.filter(x => stateKind(x) === 'blocked').length;
-      const quota = items.filter(x => stateKind(x) === 'quota').length;
-      const disabled = items.filter(x => x.disabled).length;
+      const active = items.filter(x => overviewStateKind(x) === 'active').length;
+      const blocked = items.filter(x => overviewStateKind(x) === 'blocked').length;
+      const quota = items.filter(x => overviewStateKind(x) === 'quota').length;
+      const disabled = items.filter(x => overviewStateKind(x) === 'disabled').length;
       const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
       const failures = items.reduce((sum, x) => sum + (x.proxy_failures || 0), 0);
       const abnormal = quota + blocked + disabled;
