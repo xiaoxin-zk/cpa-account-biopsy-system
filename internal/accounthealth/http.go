@@ -435,6 +435,26 @@ const indexHTML = `<!doctype html>
       if(x.effective_state) return x.effective_state;
       return 'unknown';
     }
+    function overviewQuotaEligible(x){
+      if(!x) return false;
+      if(x.disabled) return false;
+      if(x.effective_state !== 'active') return false;
+      if(x.managed_reason === 'blocked' || x.managed_reason === 'quota') return false;
+      if(x.probe_status === 'blocked' || x.probe_status === 'quota') return false;
+      if(Number(x.probe_http_status || 0) === 401) return false;
+      return true;
+    }
+    function overviewCounts(items, summary){
+      const total = items.length;
+      const blocked = items.filter(x => overviewStateKind(x) === 'blocked').length;
+      const quota = items.filter(x => overviewStateKind(x) === 'quota').length;
+      const disabled = items.filter(x => x.disabled && overviewStateKind(x) !== 'blocked' && overviewStateKind(x) !== 'quota').length;
+      const availableFromSummary = Number(summary && summary.available_accounts || 0);
+      const active = availableFromSummary > 0 ? availableFromSummary : items.filter(overviewQuotaEligible).length;
+      const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
+      const failures = items.reduce((sum, x) => sum + (x.proxy_failures || 0), 0);
+      return { total, active, blocked, quota, disabled, requests, failures, abnormal: total - active };
+    }
     function meterInfo(x){
       const kind = stateKind(x);
       if(kind === 'blocked') return { label:'额度状态: 401封禁', value:100, color:'#ef4444', exact:false };
@@ -551,14 +571,15 @@ const indexHTML = `<!doctype html>
       return '<div class="metric-tile '+(clsName||'')+'"><div class="metric-label">'+label+'</div><div class="metric-value">'+value+'</div></div>';
     }
     function overviewPanel(items){
-      const total = items.length;
-      const active = items.filter(x => overviewStateKind(x) === 'active').length;
-      const blocked = items.filter(x => overviewStateKind(x) === 'blocked').length;
-      const quota = items.filter(x => overviewStateKind(x) === 'quota').length;
-      const disabled = items.filter(x => overviewStateKind(x) === 'disabled').length;
-      const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
-      const failures = items.reduce((sum, x) => sum + (x.proxy_failures || 0), 0);
-      const abnormal = quota + blocked + disabled;
+      const counts = overviewCounts(items, currentReport.quota_summary || {});
+      const total = counts.total;
+      const active = counts.active;
+      const blocked = counts.blocked;
+      const quota = counts.quota;
+      const disabled = counts.disabled;
+      const requests = counts.requests;
+      const failures = counts.failures;
+      const abnormal = counts.abnormal;
       const healthLegend = '<span class="hero-chip"><strong>'+active+'</strong> 正常</span><span class="hero-chip"><strong>'+quota+'</strong> 额度</span><span class="hero-chip"><strong>'+blocked+'</strong> 封禁</span>';
       return '<div class="card panel-card">'
         + '<div class="panel-head"><div><div class="panel-title">账号池概览</div><div class="panel-subtitle">快速查看整体健康情况与异常分布</div></div></div>'
