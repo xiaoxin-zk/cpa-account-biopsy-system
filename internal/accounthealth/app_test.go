@@ -183,6 +183,35 @@ func TestMergeProbeIntoSummaryRetainsPreviousQuotaSnapshotWhenProbeReturnsNone(t
 	}
 }
 
+func TestBuildQuotaSummaryCountsOnlyActiveAccounts(t *testing.T) {
+	summary := buildQuotaSummary([]AuthSummary{
+		{EffectiveState: "active", QuotaItems: []QuotaItem{{Title: "周限额", Percent: 80, PercentKnown: true, ResetAt: "04/10 18:00"}, {Title: "代码审查周限额", Percent: 50, PercentKnown: true}}},
+		{EffectiveState: "active", QuotaItems: []QuotaItem{{Title: "周限额", Percent: 40, PercentKnown: true}, {Title: "5小时限额", Percent: 20, PercentKnown: true}}},
+		{EffectiveState: "active"},
+		{EffectiveState: "quota", Disabled: true, QuotaItems: []QuotaItem{{Title: "周限额", Percent: 0, PercentKnown: true}}},
+		{EffectiveState: "blocked", Disabled: true},
+		{EffectiveState: "error"},
+	}, time.Now())
+	if summary.AvailableAccounts != 3 {
+		t.Fatalf("expected 3 active accounts, got %+v", summary)
+	}
+	if summary.AccountsWithQuota != 2 || summary.MissingSnapshots != 1 || !summary.HasPartialSnapshot {
+		t.Fatalf("expected partial snapshot accounting, got %+v", summary)
+	}
+	if len(summary.Windows) != 3 {
+		t.Fatalf("expected 3 aggregate windows, got %+v", summary.Windows)
+	}
+	if summary.Windows[0].Key != "weekly" || summary.Windows[0].Remaining != 120 || summary.Windows[0].Total != 200 || summary.Windows[0].KnownAccounts != 2 {
+		t.Fatalf("unexpected weekly aggregate: %+v", summary.Windows[0])
+	}
+	if summary.Windows[1].Key != "review_weekly" || summary.Windows[1].Remaining != 50 || summary.Windows[1].Total != 100 || summary.Windows[1].KnownAccounts != 1 {
+		t.Fatalf("unexpected review aggregate: %+v", summary.Windows[1])
+	}
+	if summary.Windows[2].Key != "five_hour" || summary.Windows[2].Remaining != 20 || summary.Windows[2].Total != 100 || summary.Windows[2].KnownAccounts != 1 {
+		t.Fatalf("unexpected five-hour aggregate: %+v", summary.Windows[2])
+	}
+}
+
 func TestReconcileProbeBlockedWinsOverOK(t *testing.T) {
 	app := &App{}
 	decision := actionDecision{Disabled: true, Managed: true, ManagedReason: "blocked", EffectiveState: "blocked"}

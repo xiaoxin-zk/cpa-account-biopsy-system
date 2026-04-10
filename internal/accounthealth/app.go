@@ -71,8 +71,29 @@ type App struct {
 }
 
 type Report struct {
-	GeneratedAt time.Time     `json:"generated_at"`
-	Auths       []AuthSummary `json:"auths"`
+	GeneratedAt  time.Time     `json:"generated_at"`
+	Auths        []AuthSummary `json:"auths"`
+	QuotaSummary QuotaSummary  `json:"quota_summary,omitempty"`
+}
+
+type QuotaSummary struct {
+	Windows            []QuotaSummaryWindow `json:"windows,omitempty"`
+	AvailableAccounts  int                  `json:"available_accounts,omitempty"`
+	AccountsWithQuota  int                  `json:"accounts_with_quota,omitempty"`
+	MissingSnapshots   int                  `json:"missing_snapshots,omitempty"`
+	HasPartialSnapshot bool                 `json:"has_partial_snapshot,omitempty"`
+	UpdatedAt          time.Time            `json:"updated_at,omitempty"`
+}
+
+type QuotaSummaryWindow struct {
+	Key             string `json:"key"`
+	Title           string `json:"title"`
+	Remaining       int    `json:"remaining"`
+	Total           int    `json:"total"`
+	Percent         int    `json:"percent"`
+	KnownAccounts   int    `json:"known_accounts"`
+	MissingAccounts int    `json:"missing_accounts,omitempty"`
+	ResetAt         string `json:"reset_at,omitempty"`
 }
 
 type AuthSummary struct {
@@ -634,6 +655,7 @@ func (a *App) refresh(ctx context.Context, doProbe bool) Report {
 		}
 		return strings.ToLower(report.Auths[i].FileName) < strings.ToLower(report.Auths[j].FileName)
 	})
+	report.QuotaSummary = buildQuotaSummary(report.Auths, report.GeneratedAt)
 	a.mu.Lock()
 	a.lastReport = report
 	a.lastRunAt = report.GeneratedAt
@@ -1734,6 +1756,138 @@ func collectQuotaItems(metadata map[string]any) []QuotaItem {
 		appendItem(firstNonEmpty(stringMeta(metadata, "review_weekly_limit_title"), stringMeta(metadata, "code_review_weekly_limit_title"), reviewTitle), percent, ok, firstNonEmpty(stringMeta(metadata, "review_weekly_limit_reset_at"), stringMeta(metadata, "code_review_weekly_limit_reset_at")))
 	}
 	return items
+}
+
+func buildQuotaSummary(auths []AuthSummary, generatedAt time.Time) QuotaSummary {
+	windows := []struct {
+		key   string
+		title string
+	}{
+		{key: "weekly", title: "周额度"},
+		{key: "review_weekly", title: "代码审查周额度"},
+		{key: "five_hour", title: "5小时额度"},
+	}
+	type aggregate struct {
+		remaining int
+		total     int
+		known     int
+		missing   int
+		resetAt   string
+	}
+	aggs := make(map[string]*aggregate, len(windows))
+	for _, window := range windows {
+		aggs[window.key] = &aggregate{}
+	}
+	availableAccounts := 0
+	accountsWithQuota := 0
+	missingSnapshots := 0
+	for _, auth := range auths {
+		if !quotaSummaryEligible(auth) {
+			continue
+		}
+		availableAccounts++
+		matched := make(map[string]struct{})
+		for _, item := range auth.QuotaItems {
+			key := quotaSummaryWindowKey(item.Title)
+			if key == "" {
+				continue
+			}
+			agg := aggs[key]
+			if agg == nil {
+				continue
+			}
+			matched[key] = struct{}{}
+			if item.PercentKnown {
+				agg.remaining += clampPercent(item.Percent)
+				agg.total += 100
+				agg.known++
+			}
+			if agg.resetAt == "" && strings.TrimSpace(item.ResetAt) != "" {
+				agg.resetAt = strings.TrimSpace(item.ResetAt)
+			}
+		}
+		accountHasQuota := false
+		for _, window := range windows {
+			agg := aggs[window.key]
+			if _, ok := matched[window.key]; ok {
+				if agg != nil && agg.known > 0 {
+					accountHasQuota = true
+				}
+				continue
+			}
+			agg.missing++
+		}
+		if accountHasQuota {
+			accountsWithQuota++
+		} else {
+			missingSnapshots++
+		}
+	}
+	summary := QuotaSummary{UpdatedAt: generatedAt, AvailableAccounts: availableAccounts, AccountsWithQuota: accountsWithQuota, MissingSnapshots: missingSnapshots, HasPartialSnapshot: missingSnapshots > 0}
+	for _, window := range windows {
+		agg := aggs[window.key]
+		if agg == nil {
+			continue
+		}
+		percent := 0
+		if agg.total > 0 {
+			percent = int(float64(agg.remaining) * 100 / float64(agg.total))
+		}
+		summary.Windows = append(summary.Windows, QuotaSummaryWindow{
+			Key:             window.key,
+			Title:           window.title,
+			Remaining:       agg.remaining,
+			Total:           agg.total,
+			Percent:         percent,
+			KnownAccounts:   agg.known,
+			MissingAccounts: agg.missing,
+			ResetAt:         agg.resetAt,
+		})
+	}
+	return summary
+}
+
+func quotaSummaryEligible(auth AuthSummary) bool {
+	if auth.Disabled {
+		return false
+	}
+	if auth.EffectiveState != "active" {
+		return false
+	}
+	if auth.ManagedReason == "blocked" || auth.ManagedReason == "quota" {
+		return false
+	}
+	if auth.ProbeStatus == "blocked" || auth.ProbeStatus == "quota" {
+		return false
+	}
+	if auth.ProbeHTTPStatus == http.StatusUnauthorized {
+		return false
+	}
+	return true
+}
+
+func quotaSummaryWindowKey(title string) string {
+	title = strings.TrimSpace(strings.ToLower(title))
+	switch title {
+	case "周限额", "weekly quota", "周额度":
+		return "weekly"
+	case "代码审查周限额", "code review weekly quota", "代码审查周额度":
+		return "review_weekly"
+	case "5小时限额", "5-hour quota", "5小时额度":
+		return "five_hour"
+	default:
+		return ""
+	}
+}
+
+func clampPercent(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
 }
 
 func firstIntMeta(meta map[string]any, keys ...string) (int, bool) {

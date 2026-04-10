@@ -293,8 +293,14 @@ const indexHTML = `<!doctype html>
     .stat-bad { color:#fca5a5; font-weight:700; }
     .quota-stack { display:flex; flex-direction:column; gap:6px; min-width:260px; }
     .quota-empty { padding:6px 8px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); font-size:12px; }
-    @media (max-width: 980px) { .grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } }
+    .quota-summary-card { grid-column: span 2; }
+    .quota-summary-list { display:flex; flex-direction:column; gap:10px; margin-top:10px; }
+    .quota-summary-item { border:1px solid var(--line); border-radius:12px; padding:10px; background:#0d152d; }
+    .quota-summary-top { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+    .quota-summary-title { font-size:13px; font-weight:700; color:#e2e8f0; }
+    .quota-summary-value { font-size:12px; color:#cbd5e1; font-weight:700; white-space:nowrap; }
+    @media (max-width: 980px) { .grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .quota-summary-card { grid-column: span 2; } }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .quota-summary-card { grid-column: span 1; } .wrap { padding: 14px; } .title { font-size:22px; } }
   </style>
 </head>
 <body>
@@ -363,6 +369,7 @@ const indexHTML = `<!doctype html>
   <script>
     const el = id => document.getElementById(id);
     let current = [];
+    let currentReport = {};
     let selected = new Set();
     let authToken = localStorage.getItem('account-health-token') || '';
     let bootstrapInitialized = true;
@@ -447,6 +454,40 @@ const indexHTML = `<!doctype html>
       parts.push('#202b49 ' + start + '% 100%');
       return '<div class="card"><div class="muted">'+title+'</div><div class="ring-wrap"><div class="ring" style="background:conic-gradient('+parts.join(', ')+')"><div class="ring-value">'+text+'</div></div><div><div class="num" style="margin-top:0">'+text+'</div><div class="legend">'+legend+'</div></div></div></div>';
     }
+    function quotaSummaryVisual(value){
+      if(value <= 0) return { color:'#ef4444', text:'0%' };
+      if(value <= 33) return { color:'#ef4444', text:value + '%' };
+      if(value <= 66) return { color:'#f59e0b', text:value + '%' };
+      return { color:'#22c55e', text:value + '%' };
+    }
+    function quotaSummaryCard(summary){
+      const windows = Array.isArray(summary && summary.windows) ? summary.windows : [];
+      const available = Number(summary && summary.available_accounts || 0);
+      const withQuota = Number(summary && summary.accounts_with_quota || 0);
+      const missing = Number(summary && summary.missing_snapshots || 0);
+      const helper = [
+        '<div class="small">基于最近一次额度快照汇总</div>',
+        '<div class="small">可用账号 ' + available + ' 个，已纳入汇总 ' + withQuota + ' 个</div>'
+      ];
+      if(missing > 0 || (summary && summary.has_partial_snapshot)) helper.push('<div class="small">部分账号暂无额度快照</div>');
+      if(!windows.length || windows.every(item => Number(item.total || 0) <= 0)){
+        return '<div class="card quota-summary-card"><div class="muted">汇总剩余额度</div><div class="quota-empty" style="margin-top:10px;">当前可用账号暂无可汇总额度快照</div><div class="helper">'+helper.join('<br>')+'</div></div>';
+      }
+      const content = windows.map(item => {
+        const total = Math.max(0, Number(item.total || 0));
+        const remaining = Math.max(0, Number(item.remaining || 0));
+        const percent = Math.max(0, Math.min(100, Number(item.percent || 0)));
+        const visual = quotaSummaryVisual(percent);
+        const notes = [
+          '<div class="small">剩余 ' + remaining + ' / ' + total + ' (' + visual.text + ')</div>',
+          '<div class="small">已统计 ' + Number(item.known_accounts || 0) + ' 个账号</div>'
+        ];
+        if(Number(item.missing_accounts || 0) > 0) notes.push('<div class="small">另有 ' + Number(item.missing_accounts || 0) + ' 个可用账号暂无该额度快照</div>');
+        if(item.reset_at) notes.push('<div class="small">最近重置时间参考: ' + item.reset_at + '</div>');
+        return '<div class="quota-summary-item"><div class="quota-summary-top"><span class="quota-summary-title">'+(item.title || '额度')+'</span><span class="quota-summary-value">'+visual.text+'</span></div>'+notes.join('')+'<div class="meter"><span style="width:'+percent+'%;background:'+visual.color+'"></span></div></div>';
+      }).join('');
+      return '<div class="card quota-summary-card"><div class="muted">汇总剩余额度</div><div class="quota-summary-list">'+content+'</div><div class="helper">'+helper.join('<br>')+'</div></div>';
+    }
     function cards(items){
       const total = items.length;
       const active = items.filter(x => stateKind(x) === 'active').length;
@@ -461,6 +502,7 @@ const indexHTML = `<!doctype html>
         { color:'#f59e0b', value:quota },
         { color:'#ef4444', value:blocked }
       ], total, healthLegend) +
+        quotaSummaryCard(currentReport.quota_summary || {})+
         '<div class="card"><div class="muted">总账号</div><div class="num">'+total+'</div></div>'+
         '<div class="card"><div class="muted">总请求</div><div class="num">'+requests+'</div></div>'+
         '<div class="card"><div class="muted">请求失败</div><div class="num">'+failures+'</div></div>'+
@@ -645,6 +687,7 @@ const indexHTML = `<!doctype html>
         if(res.status === 401){ showApp(false); el('loginMsg').textContent = '口令错误或未登录'; return; }
         const data = await res.json();
         const report = data.report || {};
+        currentReport = report;
         current = report.auths || [];
         showApp(true);
         const actionText = run ? '活检完成' : '快照已刷新';
