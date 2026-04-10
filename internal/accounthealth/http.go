@@ -48,12 +48,20 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func setNoCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+}
+
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(indexHTML))
 }
 
 func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	if !a.hasWebToken() {
 		w.WriteHeader(http.StatusPreconditionRequired)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": "dashboard password not initialized"})
@@ -79,6 +87,7 @@ func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleRun(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	if !a.hasWebToken() {
 		w.WriteHeader(http.StatusPreconditionRequired)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": "dashboard password not initialized"})
@@ -98,6 +107,7 @@ func (a *App) handleRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAuthAction(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	if !a.hasWebToken() {
 		w.WriteHeader(http.StatusPreconditionRequired)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": "dashboard password not initialized"})
@@ -168,11 +178,13 @@ func (a *App) handleAuthAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "time": time.Now().UTC()})
 }
 
 func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	if a.hasWebToken() && !a.authorize(w, r) {
 		return
 	}
@@ -204,6 +216,7 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleBootstrapState(w http.ResponseWriter, r *http.Request) {
+	setNoCacheHeaders(w)
 	a.ensureFreshReport(r.Context())
 	a.mu.RLock()
 	authCount := len(a.lastReport.Auths)
