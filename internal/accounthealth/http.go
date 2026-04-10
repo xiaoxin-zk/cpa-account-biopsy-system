@@ -234,7 +234,7 @@ const indexHTML = `<!doctype html>
     .title { font-size: 28px; font-weight:700; }
     .muted { color: var(--muted); }
     .brand-meta { margin-top:8px; font-size:12px; color:var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
-    .grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .grid { display:grid; grid-template-columns: 1.1fr .9fr; gap:14px; margin-bottom:16px; align-items:start; }
     .card { background: rgba(18,25,51,.88); border:1px solid var(--line); border-radius:16px; padding:16px; backdrop-filter: blur(12px); }
     .num { font-size: 28px; font-weight: 700; margin-top: 8px; }
     .bar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 14px; }
@@ -298,9 +298,37 @@ const indexHTML = `<!doctype html>
     .quota-summary-item { border:1px solid var(--line); border-radius:12px; padding:10px; background:#0d152d; }
     .quota-summary-top { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
     .quota-summary-title { font-size:13px; font-weight:700; color:#e2e8f0; }
-    .quota-summary-value { font-size:12px; color:#cbd5e1; font-weight:700; white-space:nowrap; }
-    @media (max-width: 980px) { .grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .quota-summary-card { grid-column: span 2; } }
-    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .quota-summary-card { grid-column: span 1; } .wrap { padding: 14px; } .title { font-size:22px; } }
+    .quota-summary-value { font-size:18px; color:#f8fafc; font-weight:800; white-space:nowrap; }
+    .panel-card { padding:18px; background:rgba(15,22,42,.94); }
+    .panel-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:14px; }
+    .panel-title { font-size:15px; font-weight:800; color:#f8fafc; }
+    .panel-subtitle { margin-top:4px; font-size:12px; color:var(--muted); }
+    .overview-layout { display:grid; grid-template-columns: minmax(220px, 280px) minmax(0,1fr); gap:14px; align-items:stretch; }
+    .overview-hero { border:1px solid var(--line); border-radius:14px; padding:14px; background:#0d152d; display:flex; flex-direction:column; gap:12px; }
+    .overview-main { display:grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap:10px; }
+    .overview-secondary { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
+    .metric-tile { border:1px solid var(--line); border-radius:14px; padding:12px; background:#0d152d; min-width:0; }
+    .metric-label { font-size:12px; color:var(--muted); }
+    .metric-value { margin-top:8px; font-size:24px; font-weight:800; color:#f8fafc; line-height:1; }
+    .metric-emphasis .metric-value { color:#86efac; }
+    .metric-warn .metric-value { color:#fcd34d; }
+    .metric-bad .metric-value { color:#fca5a5; }
+    .metric-neutral .metric-value { color:#cbd5e1; }
+    .hero-summary { display:flex; flex-direction:column; gap:8px; }
+    .hero-line { display:flex; justify-content:space-between; gap:10px; font-size:12px; color:#cbd5e1; }
+    .hero-status-row { display:flex; flex-wrap:wrap; gap:8px; }
+    .hero-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; border:1px solid var(--line); font-size:12px; color:#cbd5e1; background:#121933; }
+    .hero-chip strong { color:#f8fafc; }
+    .quota-meta-grid { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:8px; margin-top:8px; }
+    .quota-meta-item { padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#121933; }
+    .quota-meta-label { font-size:11px; color:var(--muted); }
+    .quota-meta-value { margin-top:4px; font-size:12px; color:#dbe4ff; font-weight:700; }
+    .quota-meta-item.subtle .quota-meta-value { color:#aebad8; font-weight:600; }
+    .quota-summary-item.tight { border-color:rgba(239,68,68,.34); }
+    .quota-footnote { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
+    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .overview-layout { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+    @media (max-width: 980px) { .quota-summary-card { grid-column: span 1; } }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } }
   </style>
 </head>
 <body>
@@ -452,7 +480,7 @@ const indexHTML = `<!doctype html>
         start = end;
       });
       parts.push('#202b49 ' + start + '% 100%');
-      return '<div class="card"><div class="muted">'+title+'</div><div class="ring-wrap"><div class="ring" style="background:conic-gradient('+parts.join(', ')+')"><div class="ring-value">'+text+'</div></div><div><div class="num" style="margin-top:0">'+text+'</div><div class="legend">'+legend+'</div></div></div></div>';
+      return '<div class="overview-hero"><div class="muted">'+title+'</div><div class="ring-wrap"><div class="ring" style="background:conic-gradient('+parts.join(', ')+')"><div class="ring-value">'+text+'</div></div><div class="hero-summary"><div class="hero-status-row">'+legend+'</div></div></div></div>';
     }
     function quotaSummaryVisual(value){
       if(value <= 0) return { color:'#ef4444', text:'0%' };
@@ -465,30 +493,33 @@ const indexHTML = `<!doctype html>
       const available = Number(summary && summary.available_accounts || 0);
       const withQuota = Number(summary && summary.accounts_with_quota || 0);
       const missing = Number(summary && summary.missing_snapshots || 0);
-      const helper = [
-        '<div class="small">基于最近一次额度快照汇总</div>',
-        '<div class="small">可用账号 ' + available + ' 个，已纳入汇总 ' + withQuota + ' 个</div>'
-      ];
-      if(missing > 0 || (summary && summary.has_partial_snapshot)) helper.push('<div class="small">部分账号暂无额度快照</div>');
+      const helper = ['基于最近一次额度快照汇总'];
       if(!windows.length || windows.every(item => Number(item.total || 0) <= 0)){
-        return '<div class="card quota-summary-card"><div class="muted">汇总剩余额度</div><div class="quota-empty" style="margin-top:10px;">当前可用账号暂无可汇总额度快照</div><div class="helper">'+helper.join('<br>')+'</div></div>';
+        const emptyMeta = '<div class="quota-meta-grid"><div class="quota-meta-item"><div class="quota-meta-label">可用账号</div><div class="quota-meta-value">'+available+'</div></div><div class="quota-meta-item subtle"><div class="quota-meta-label">已纳入汇总</div><div class="quota-meta-value">'+withQuota+'</div></div></div>';
+        return '<div class="card panel-card quota-summary-card"><div class="panel-head"><div><div class="panel-title">汇总剩余额度</div><div class="panel-subtitle">基于最近一次额度快照汇总</div></div></div>'+emptyMeta+'<div class="quota-empty" style="margin-top:10px;">当前可用账号暂无可汇总额度快照</div><div class="quota-footnote">'+helper.join(' ')+'</div></div>';
       }
+      const sortedWindows = windows.slice().sort((a,b) => Number(a.percent || 0) - Number(b.percent || 0));
+      const tightKey = sortedWindows.length ? sortedWindows[0].key : '';
       const content = windows.map(item => {
         const total = Math.max(0, Number(item.total || 0));
         const remaining = Math.max(0, Number(item.remaining || 0));
         const percent = Math.max(0, Math.min(100, Number(item.percent || 0)));
         const visual = quotaSummaryVisual(percent);
-        const notes = [
-          '<div class="small">剩余 ' + remaining + ' / ' + total + ' (' + visual.text + ')</div>',
-          '<div class="small">已统计 ' + Number(item.known_accounts || 0) + ' 个账号</div>'
+        const meta = [
+          '<div class="quota-meta-item"><div class="quota-meta-label">剩余 / 总量</div><div class="quota-meta-value">' + remaining + ' / ' + total + '</div></div>',
+          '<div class="quota-meta-item"><div class="quota-meta-label">已统计账号数</div><div class="quota-meta-value">' + Number(item.known_accounts || 0) + '</div></div>'
         ];
-        if(Number(item.missing_accounts || 0) > 0) notes.push('<div class="small">另有 ' + Number(item.missing_accounts || 0) + ' 个可用账号暂无该额度快照</div>');
-        if(item.reset_at) notes.push('<div class="small">最近重置时间参考: ' + item.reset_at + '</div>');
-        return '<div class="quota-summary-item"><div class="quota-summary-top"><span class="quota-summary-title">'+(item.title || '额度')+'</span><span class="quota-summary-value">'+visual.text+'</span></div>'+notes.join('')+'<div class="meter"><span style="width:'+percent+'%;background:'+visual.color+'"></span></div></div>';
+        if(Number(item.missing_accounts || 0) > 0) meta.push('<div class="quota-meta-item subtle"><div class="quota-meta-label">缺失快照</div><div class="quota-meta-value">' + Number(item.missing_accounts || 0) + ' 个可用账号暂无该额度快照</div></div>');
+        if(item.reset_at) meta.push('<div class="quota-meta-item subtle"><div class="quota-meta-label">最近重置时间</div><div class="quota-meta-value">' + item.reset_at + '</div></div>');
+        return '<div class="quota-summary-item'+(item.key === tightKey ? ' tight' : '')+'"><div class="quota-summary-top"><span class="quota-summary-title">'+(item.title || '额度')+'</span><span class="quota-summary-value">'+visual.text+'</span></div><div class="meter"><span style="width:'+percent+'%;background:'+visual.color+'"></span></div><div class="quota-meta-grid">'+meta.join('')+'</div></div>';
       }).join('');
-      return '<div class="card quota-summary-card"><div class="muted">汇总剩余额度</div><div class="quota-summary-list">'+content+'</div><div class="helper">'+helper.join('<br>')+'</div></div>';
+      const summaryMeta = '<div class="quota-meta-grid"><div class="quota-meta-item"><div class="quota-meta-label">可用账号</div><div class="quota-meta-value">'+available+'</div></div><div class="quota-meta-item"><div class="quota-meta-label">已纳入汇总</div><div class="quota-meta-value">'+withQuota+'</div></div>'+(missing > 0 || (summary && summary.has_partial_snapshot) ? '<div class="quota-meta-item subtle"><div class="quota-meta-label">缺失快照提示</div><div class="quota-meta-value">部分账号暂无额度快照</div></div>' : '')+'</div>';
+      return '<div class="card panel-card quota-summary-card"><div class="panel-head"><div><div class="panel-title">汇总剩余额度</div><div class="panel-subtitle">基于最近一次额度快照汇总</div></div></div>'+summaryMeta+'<div class="quota-summary-list">'+content+'</div><div class="quota-footnote">'+helper.join(' ')+'</div></div>';
     }
-    function cards(items){
+    function metricTile(label, value, clsName){
+      return '<div class="metric-tile '+(clsName||'')+'"><div class="metric-label">'+label+'</div><div class="metric-value">'+value+'</div></div>';
+    }
+    function overviewPanel(items){
       const total = items.length;
       const active = items.filter(x => stateKind(x) === 'active').length;
       const blocked = items.filter(x => stateKind(x) === 'blocked').length;
@@ -496,20 +527,35 @@ const indexHTML = `<!doctype html>
       const disabled = items.filter(x => x.disabled).length;
       const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
       const failures = items.reduce((sum, x) => sum + (x.proxy_failures || 0), 0);
-      const healthLegend = '<span style="color:#86efac">正常 '+active+'</span><span style="color:#fcd34d">额度 '+quota+'</span><span style="color:#fca5a5">封禁 '+blocked+'</span>';
-      el('cards').innerHTML = ringCard('号池健康度', [
-        { color:'#22c55e', value:active },
-        { color:'#f59e0b', value:quota },
-        { color:'#ef4444', value:blocked }
-      ], total, healthLegend) +
-        quotaSummaryCard(currentReport.quota_summary || {})+
-        '<div class="card"><div class="muted">总账号</div><div class="num">'+total+'</div></div>'+
-        '<div class="card"><div class="muted">总请求</div><div class="num">'+requests+'</div></div>'+
-        '<div class="card"><div class="muted">请求失败</div><div class="num">'+failures+'</div></div>'+
-        '<div class="card"><div class="muted">401封禁</div><div class="num" style="color:#fca5a5">'+blocked+'</div></div>'+
-        '<div class="card"><div class="muted">额度耗尽</div><div class="num" style="color:#fcd34d">'+quota+'</div></div>'+
-        '<div class="card"><div class="muted">正常账号</div><div class="num" style="color:#86efac">'+active+'</div></div>'+
-        '<div class="card"><div class="muted">已停用</div><div class="num">'+disabled+'</div></div>';
+      const abnormal = quota + blocked + disabled;
+      const healthLegend = '<span class="hero-chip"><strong>'+active+'</strong> 正常</span><span class="hero-chip"><strong>'+quota+'</strong> 额度</span><span class="hero-chip"><strong>'+blocked+'</strong> 封禁</span>';
+      return '<div class="card panel-card">'
+        + '<div class="panel-head"><div><div class="panel-title">账号池概览</div><div class="panel-subtitle">快速查看整体健康情况与异常分布</div></div></div>'
+        + '<div class="overview-layout">'
+        + ringCard('号池健康度', [
+            { color:'#22c55e', value:active },
+            { color:'#f59e0b', value:quota },
+            { color:'#ef4444', value:blocked }
+          ], total, healthLegend)
+        + '<div>'
+        + '<div class="overview-main">'
+        + metricTile('总账号', total, 'metric-neutral')
+        + metricTile('正常账号', active, 'metric-emphasis')
+        + metricTile('额度耗尽', quota, 'metric-warn')
+        + metricTile('401封禁', blocked, 'metric-bad')
+        + metricTile('已停用', disabled, 'metric-neutral')
+        + '</div>'
+        + '<div class="overview-secondary">'
+        + metricTile('总请求', requests, 'metric-neutral')
+        + metricTile('请求失败', failures, failures > 0 ? 'metric-bad' : 'metric-neutral')
+        + '</div>'
+        + '<div class="helper">当前异常项共 '+abnormal+' 个，优先关注封禁、额度耗尽和已停用账号。</div>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+    }
+    function cards(items){
+      el('cards').innerHTML = overviewPanel(items) + quotaSummaryCard(currentReport.quota_summary || {});
     }
     function updateSelectionMeta(filtered){
       const all = filtered || current;
