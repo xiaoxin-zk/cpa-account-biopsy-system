@@ -65,6 +65,124 @@ CPA Account Biopsy System 是一个独立部署的账号活检 sidecar，专门�
 bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
 ```
 
+### Windows 安装说明
+
+- Windows 下不需要手动填写 `C:\...` 或 `D:\...` 绝对路径作为安装前提。
+- `scripts/manage.sh` 本身是 Bash 脚本，因此 Windows 下需要 **Git Bash** 或 **WSL** 才能真正执行安装脚本。
+- 安装脚本会优先自动发现可用账号目录。
+- 如果未发现可用目录，会自动回退到安装目录下的数据目录。
+- Windows 默认安装目录为：`%USERPROFILE%\cpa-account-biopsy-system`
+- Windows 默认账号目录为：`%USERPROFILE%\cpa-account-biopsy-system\data\auths`
+- 只有高级场景下，才建议手动指定自定义账号目录。
+
+推荐方式：
+
+- 默认主流程：**Windows PowerShell 启动 Git Bash 包装命令**
+- 直接执行方式：**Git Bash**
+- 高级方式：**WSL** 或自定义目录安装
+
+如果你输入了无效目录，脚本会：
+
+- 明确提示目录无效
+- 自动回退到默认目录
+- 告知最终实际使用的目录
+
+#### Windows PowerShell 默认安装 / 启动流程
+
+说明：
+
+- 这是当前推荐的 Windows 默认主流程。
+- 它会在 PowerShell 中下载脚本，并自动探测本机可用的 Bash 来执行。
+- 不要再把 Unix 的 `bash <(curl ...)` 当成 Windows 用户默认安装方式。
+
+```powershell
+$script = Join-Path $env:TEMP 'cpa-manage.sh'
+Invoke-WebRequest 'https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh' -OutFile $script
+$bash = $null
+$cmd = Get-Command bash -ErrorAction SilentlyContinue
+if ($cmd) {
+  $bash = $cmd.Source
+}
+if (-not $bash) {
+  $candidates = @(
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files\Git\usr\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\usr\bin\bash.exe'
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      $bash = $candidate
+      break
+    }
+  }
+}
+if (-not $bash) {
+  Write-Error '未找到可用的 bash。请先安装 Git for Windows（Git Bash），或改用 WSL 后再执行安装脚本。'
+  return
+}
+& $bash $script
+```
+
+如果系统里已经有 `bash` 命令，PowerShell 会优先直接使用；只有找不到时才会继续探测常见 Git Bash 安装路径。
+
+#### Git Bash 默认安装 / 启动流程
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
+```
+
+说明：
+
+- 仅适用于 Git Bash / WSL 终端
+- 不适合作为普通 Windows PowerShell 用户的默认说明
+- 找不到主项目账号目录时，会自动回退到 `%USERPROFILE%\cpa-account-biopsy-system\data\auths`
+
+#### Windows 自定义目录流程（PowerShell）
+
+```powershell
+$env:CPA_AUTH_DIR = 'D:/CPAData/auths'
+$script = Join-Path $env:TEMP 'cpa-manage.sh'
+Invoke-WebRequest 'https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh' -OutFile $script
+$bash = $null
+$cmd = Get-Command bash -ErrorAction SilentlyContinue
+if ($cmd) {
+  $bash = $cmd.Source
+}
+if (-not $bash) {
+  $candidates = @(
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files\Git\usr\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\usr\bin\bash.exe'
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      $bash = $candidate
+      break
+    }
+  }
+}
+if (-not $bash) {
+  Write-Error '未找到可用的 bash。请先安装 Git for Windows（Git Bash），或改用 WSL 后再执行安装脚本。'
+  return
+}
+& $bash $script
+```
+
+#### Windows 自定义目录流程（Git Bash）
+
+```bash
+export CPA_AUTH_DIR='D:/CPAData/auths'
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
+```
+
+说明：
+
+- 仅高级场景才建议这样做
+- 自定义目录会先校验和规范化
+- 如果目录无效，脚本不会直接生成错误 volume，而是自动回退到默认目录
+
 运行后会出现菜单：
 
 1. 安装
@@ -127,6 +245,8 @@ cd /opt/cpa-account-biopsy-system
 git pull --ff-only
 docker compose --env-file .env up -d --build
 ```
+
+Windows 下如果使用默认安装目录，可在对应安装目录中执行相同的更新逻辑；不需要手填新的绝对路径。
 
 ### 卸载方式
 
@@ -241,6 +361,106 @@ If you are looking for a first contribution, docs, tests, issue reproduction, an
 Unified entry command:
 
 ```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
+```
+
+### Windows Notes
+
+- Windows users do not need to manually enter a `C:\...` or `D:\...` absolute path as the normal installation flow.
+- `scripts/manage.sh` is a Bash installer, so Windows needs **Git Bash** or **WSL** to actually run it.
+- The installer first tries auto-discovery.
+- If no valid auth directory is found, it falls back to the install-local data directory.
+- Default Windows install directory: `%USERPROFILE%\cpa-account-biopsy-system`
+- Default Windows auth directory: `%USERPROFILE%\cpa-account-biopsy-system\data\auths`
+- Manual custom directories are intended only for advanced setups.
+
+Recommended usage:
+
+- Default Windows flow: **PowerShell wrapper that launches Git Bash**
+- Direct shell flow: **Git Bash**
+- Advanced flow: **WSL** or custom auth directory override
+
+If a custom path is invalid, the installer now:
+
+- reports that the path is invalid
+- falls back automatically
+- tells you which directory is actually used
+
+#### Windows PowerShell default install / start flow
+
+```powershell
+$script = Join-Path $env:TEMP 'cpa-manage.sh'
+Invoke-WebRequest 'https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh' -OutFile $script
+$bash = $null
+$cmd = Get-Command bash -ErrorAction SilentlyContinue
+if ($cmd) {
+  $bash = $cmd.Source
+}
+if (-not $bash) {
+  $candidates = @(
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files\Git\usr\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\usr\bin\bash.exe'
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      $bash = $candidate
+      break
+    }
+  }
+}
+if (-not $bash) {
+  Write-Error 'No usable bash executable was found. Please install Git for Windows (Git Bash), or use WSL instead.'
+  return
+}
+& $bash $script
+```
+
+Do not treat Unix-style `bash <(curl ...)` as the default installation command for normal Windows PowerShell users.
+
+#### Git Bash default install / start flow
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
+```
+
+#### Windows custom directory flow (PowerShell)
+
+```powershell
+$env:CPA_AUTH_DIR = 'D:/CPAData/auths'
+$script = Join-Path $env:TEMP 'cpa-manage.sh'
+Invoke-WebRequest 'https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh' -OutFile $script
+$bash = $null
+$cmd = Get-Command bash -ErrorAction SilentlyContinue
+if ($cmd) {
+  $bash = $cmd.Source
+}
+if (-not $bash) {
+  $candidates = @(
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files\Git\usr\bin\bash.exe',
+    'C:\Program Files (x86)\Git\bin\bash.exe',
+    'C:\Program Files (x86)\Git\usr\bin\bash.exe'
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      $bash = $candidate
+      break
+    }
+  }
+}
+if (-not $bash) {
+  Write-Error 'No usable bash executable was found. Please install Git for Windows (Git Bash), or use WSL instead.'
+  return
+}
+& $bash $script
+```
+
+#### Windows custom directory flow (Git Bash)
+
+```bash
+export CPA_AUTH_DIR='D:/CPAData/auths'
 bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biopsy-system/main/scripts/manage.sh)
 ```
 

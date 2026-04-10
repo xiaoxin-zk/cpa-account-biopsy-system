@@ -2,11 +2,33 @@
 set -euo pipefail
 
 APP_NAME="cpa-account-biopsy-system"
-INSTALL_DIR="${CPA_INSTALL_DIR:-/opt/${APP_NAME}}"
+
+is_windows_platform() {
+  case "${CPA_PLATFORM_OVERRIDE:-}" in
+    windows) return 0 ;;
+    linux) return 1 ;;
+  esac
+  case "${OS:-}:$(uname -s 2>/dev/null || true)" in
+    Windows_NT:*|*:MINGW*|*:MSYS*|*:CYGWIN*) return 0 ;;
+  esac
+  return 1
+}
+
+default_install_dir() {
+  if is_windows_platform; then
+    printf '%s/%s' "${USERPROFILE:-${HOME:-$(pwd)}}" "$APP_NAME"
+  else
+    printf '/opt/%s' "$APP_NAME"
+  fi
+}
+
+INSTALL_DIR="${CPA_INSTALL_DIR:-$(default_install_dir)}"
 REPO_URL="${CPA_REPO_URL:-https://github.com/xiaoxin-zk/cpa-account-biopsy-system.git}"
 REPO_REF="${CPA_REPO_REF:-main}"
 ENV_FILE="$INSTALL_DIR/.env"
 TEST_MODE="${CPA_TEST_MODE:-0}"
+DEFAULT_AUTH_SUBDIR="data/auths"
+CPA_AUTH_CONTAINER_DIR="${CPA_AUTH_CONTAINER_DIR:-/data/auths}"
 
 log() { printf '[%s] %s\n' "$APP_NAME" "$*"; }
 die() { log "$*"; exit 1; }
@@ -149,6 +171,111 @@ prompt_if_empty() {
   eval "$var_name=\"$current_value\""
 }
 
+trim_wrapped_quotes() {
+  local value="$1"
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  printf '%s' "$value"
+}
+
+default_auth_dir() {
+  printf '%s/%s' "$INSTALL_DIR" "$DEFAULT_AUTH_SUBDIR"
+}
+
+normalize_host_dir() {
+  local raw normalized
+  raw="$(trim_wrapped_quotes "${1:-}")"
+  raw="${raw%/}"
+  raw="${raw%\\}"
+  [ -n "$raw" ] || return 1
+  if is_windows_platform; then
+    if has_cmd cygpath; then
+      normalized="$(cygpath -am "$raw" 2>/dev/null || true)"
+    else
+      normalized="${raw//\\//}"
+      case "$normalized" in
+        [A-Za-z]:/*|./*|../*|/*) ;;
+        *) return 1 ;;
+      esac
+    fi
+  else
+    if [ -d "$raw" ]; then
+      normalized="$(cd "$raw" 2>/dev/null && pwd || true)"
+    else
+      normalized="$raw"
+    fi
+  fi
+  [ -n "$normalized" ] || return 1
+  printf '%s' "$normalized"
+}
+
+ensure_auth_dir_exists() {
+  local dir="$1"
+  [ -n "$dir" ] || return 1
+  if [ -d "$dir" ]; then
+    return 0
+  fi
+  mkdir -p "$dir"
+}
+
+resolve_auth_dir() {
+  local fallback normalized custom_value
+  fallback="$(default_auth_dir)"
+
+  if [ -n "${CPA_AUTH_DIR:-}" ]; then
+    normalized="$(normalize_host_dir "$CPA_AUTH_DIR" 2>/dev/null || true)"
+    if [ -n "$normalized" ] && [ -d "$normalized" ]; then
+      CPA_AUTH_DIR="$normalized"
+      return 0
+    fi
+    log "检测到账号目录配置无效，已忽略并准备回退: ${CPA_AUTH_DIR}"
+    CPA_AUTH_DIR=""
+  fi
+
+  if is_windows_platform; then
+    log "Windows 下建议直接使用默认目录，不需要手动输入绝对路径。"
+    log "如未指定，将自动使用程序目录下的数据目录。"
+    if [ "$TEST_MODE" = "1" ]; then
+      custom_value=""
+    else
+      read -r -p "如需自定义账号目录（高级场景，可直接回车使用默认目录）: " custom_value
+    fi
+    custom_value="$(trim_wrapped_quotes "$custom_value")"
+    if [ -n "$custom_value" ]; then
+      normalized="$(normalize_host_dir "$custom_value" 2>/dev/null || true)"
+      if [ -n "$normalized" ] && [ -d "$normalized" ]; then
+        CPA_AUTH_DIR="$normalized"
+        log "已使用自定义账号目录: $CPA_AUTH_DIR"
+        return 0
+      fi
+      log "输入的目录无效，已自动回退到默认目录。"
+    fi
+    ensure_auth_dir_exists "$fallback"
+    CPA_AUTH_DIR="$(normalize_host_dir "$fallback" 2>/dev/null || printf '%s' "$fallback")"
+    log "Windows 下最终使用账号目录: $CPA_AUTH_DIR"
+    return 0
+  fi
+
+  prompt_if_empty CPA_AUTH_DIR "未自动找到 CLIProxyAPI 的账号目录，请输入 auths 目录路径"
+  normalized="$(normalize_host_dir "$CPA_AUTH_DIR" 2>/dev/null || true)"
+  [ -n "$normalized" ] && CPA_AUTH_DIR="$normalized"
+}
+
+extract_bind_source() {
+  local line="$1"
+  if [[ "$line" =~ ^([A-Za-z]:[\\/][^:]*):(/[^:]*)(:.*)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$line" =~ ^([^:]+):(/[^:]*)(:.*)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
 detect_container_name() {
   if ! has_cmd docker; then
     return 0
@@ -166,11 +293,25 @@ detect_from_container() {
   binds="$(docker inspect "$name" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}' 2>/dev/null || true)"
   discovered_auth_dir="$(printf '%s' "$inspect" | awk -F' = ' '$1=="/root/.cli-proxy-api"{print $2}' | head -n 1)"
   if [ -z "$discovered_auth_dir" ]; then
-    discovered_auth_dir="$(printf '%s' "$binds" | awk -F: '/\.cli-proxy-api|auths/ {print $1}' | head -n 1)"
+    while IFS= read -r line; do
+      case "$line" in
+        *auths*|*.cli-proxy-api*)
+          discovered_auth_dir="$(extract_bind_source "$line" || true)"
+          [ -n "$discovered_auth_dir" ] && break
+          ;;
+      esac
+    done <<< "$binds"
   fi
   discovered_config_path="$(printf '%s' "$inspect" | awk -F' = ' '$2 ~ /config.yaml$/{print $2}' | head -n 1)"
   if [ -z "$discovered_config_path" ]; then
-    discovered_config_path="$(printf '%s' "$binds" | awk -F: '/config.yaml/ {print $1}' | head -n 1)"
+    while IFS= read -r line; do
+      case "$line" in
+        *config.yaml*)
+          discovered_config_path="$(extract_bind_source "$line" || true)"
+          [ -n "$discovered_config_path" ] && break
+          ;;
+      esac
+    done <<< "$binds"
   fi
   discovered_management_key="$(printf '%s' "$envs" | awk -F= '$1=="MANAGEMENT_PASSWORD"{print substr($0,index($0,"=")+1)}' | head -n 1)"
   if printf '%s' "$envs" | grep -q '^PORT='; then
@@ -265,7 +406,7 @@ detect_from_bind_directories() {
   [ -n "$binds" ] || return 0
   while IFS= read -r line; do
     local src
-    src="$(printf '%s' "$line" | awk -F: '{print $1}')"
+    src="$(extract_bind_source "$line" || true)"
     [ -n "$src" ] || continue
     if [ -d "$src" ]; then
       scan_candidate_root "$src"
@@ -302,6 +443,9 @@ detect_common_paths() {
 
 validate_host_inputs() {
   [ -n "${CPA_AUTH_DIR:-}" ] || die "auths 目录为空，无法安装"
+  if is_windows_platform; then
+    ensure_auth_dir_exists "$CPA_AUTH_DIR"
+  fi
   [ -d "$CPA_AUTH_DIR" ] || die "auths 目录不存在: $CPA_AUTH_DIR"
 }
 
@@ -385,11 +529,12 @@ prepare_config() {
     CPA_CONFIG_PATH=""
   fi
 
-  prompt_if_empty CPA_AUTH_DIR "未自动找到 CLIProxyAPI 的账号目录，请输入 auths 目录路径"
+  resolve_auth_dir
   prompt_if_empty CPA_MANAGEMENT_URL "未自动获取到 CLIProxyAPI 管理地址，请输入管理地址（例如 http://127.0.0.1:8317）"
   prompt_if_empty CPA_MANAGEMENT_KEY "未自动获取到 CLIProxyAPI 管理密码，请输入你的 CLIProxyAPI 管理密码"
 
   upsert_env CPA_AUTH_DIR "${CPA_AUTH_DIR:-}"
+  upsert_env CPA_AUTH_CONTAINER_DIR "${CPA_AUTH_CONTAINER_DIR:-/data/auths}"
   upsert_env CPA_MANAGEMENT_URL "${CPA_MANAGEMENT_URL:-}"
   upsert_env CPA_MANAGEMENT_KEY "${CPA_MANAGEMENT_KEY:-}"
   upsert_env CPA_LISTEN_ADDR "${CPA_LISTEN_ADDR:-:18317}"
@@ -490,11 +635,17 @@ run_menu() {
   done
 }
 
-case "${1:-}" in
-  --install) install_or_update ;;
-  --update) install_or_update ;;
-  --restart) restart_service ;;
-  --status) show_status ;;
-  --uninstall) uninstall_service ;;
-  *) run_menu ;;
-esac
+main() {
+  case "${1:-}" in
+    --install) install_or_update ;;
+    --update) install_or_update ;;
+    --restart) restart_service ;;
+    --status) show_status ;;
+    --uninstall) uninstall_service ;;
+    *) run_menu ;;
+  esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
