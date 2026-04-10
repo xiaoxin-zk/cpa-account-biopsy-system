@@ -326,9 +326,17 @@ const indexHTML = `<!doctype html>
     .quota-meta-item.subtle .quota-meta-value { color:#aebad8; font-weight:600; }
     .quota-summary-item.tight { border-color:rgba(239,68,68,.34); }
     .quota-footnote { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
+    .summary-toggle { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); background:#121933; color:#dbe4ff; border-radius:999px; padding:6px 10px; font-size:12px; font-weight:700; cursor:pointer; }
+    .summary-toggle:hover { background:#17213c; }
+    .summary-arrow { display:inline-block; transition: transform .16s ease; }
+    .summary-arrow.open { transform: rotate(180deg); }
+    .summary-compact { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:10px; margin-top:10px; }
+    .summary-compact-item { border:1px solid var(--line); border-radius:12px; background:#0d152d; padding:10px 12px; }
+    .summary-compact-value { margin-top:6px; font-size:14px; font-weight:800; color:#f8fafc; }
+    .summary-compact-value.warn { color:#fcd34d; }
     @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .overview-layout { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(3,minmax(0,1fr)); } }
     @media (max-width: 980px) { .quota-summary-card { grid-column: span 1; } }
-    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid, .summary-compact { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } }
   </style>
 </head>
 <body>
@@ -399,6 +407,7 @@ const indexHTML = `<!doctype html>
     let current = [];
     let currentReport = {};
     let selected = new Set();
+    let quotaSummaryExpanded = false;
     let authToken = localStorage.getItem('account-health-token') || '';
     let bootstrapInitialized = true;
     let recentlyUpdated = new Set();
@@ -504,11 +513,18 @@ const indexHTML = `<!doctype html>
       const withQuota = Number(summary && summary.accounts_with_quota || 0);
       const missing = Number(summary && summary.missing_snapshots || 0);
       const helper = ['基于最近一次额度快照汇总'];
+      const sortedWindows = windows.slice().sort((a,b) => Number(a.percent || 0) - Number(b.percent || 0));
+      const tightWindow = sortedWindows.length ? sortedWindows[0] : null;
+      const toggle = '<button class="summary-toggle" onclick="toggleQuotaSummary()"><span>'+(quotaSummaryExpanded ? '收起详情' : '展开查看')+'</span><span class="summary-arrow'+(quotaSummaryExpanded ? ' open' : '')+'">▾</span></button>';
+      const compact = '<div class="summary-compact">'
+        + '<div class="summary-compact-item"><div class="small">可用账号</div><div class="summary-compact-value">'+available+'</div></div>'
+        + '<div class="summary-compact-item"><div class="small">已纳入汇总</div><div class="summary-compact-value">'+withQuota+'</div></div>'
+        + '<div class="summary-compact-item"><div class="small">最紧张额度项</div><div class="summary-compact-value'+(tightWindow && Number(tightWindow.percent || 0) <= 33 ? ' warn' : '')+'">'+(tightWindow ? ((tightWindow.title || '额度') + ' · ' + Number(tightWindow.percent || 0) + '%') : '暂无快照')+'</div></div>'
+        + '</div>';
       if(!windows.length || windows.every(item => Number(item.total || 0) <= 0)){
         const emptyMeta = '<div class="quota-meta-grid"><div class="quota-meta-item"><div class="quota-meta-label">可用账号</div><div class="quota-meta-value">'+available+'</div></div><div class="quota-meta-item subtle"><div class="quota-meta-label">已纳入汇总</div><div class="quota-meta-value">'+withQuota+'</div></div></div>';
-        return '<div class="card panel-card quota-summary-card"><div class="panel-head"><div><div class="panel-title">汇总剩余额度</div><div class="panel-subtitle">基于最近一次额度快照汇总</div></div></div>'+emptyMeta+'<div class="quota-empty" style="margin-top:10px;">当前可用账号暂无可汇总额度快照</div><div class="quota-footnote">'+helper.join(' ')+'</div></div>';
+        return '<div class="card panel-card quota-summary-card"><div class="panel-head"><div><div class="panel-title">汇总剩余额度</div><div class="panel-subtitle">基于最近一次额度快照汇总</div></div>'+toggle+'</div>'+compact+(quotaSummaryExpanded ? (emptyMeta+'<div class="quota-empty" style="margin-top:10px;">当前可用账号暂无可汇总额度快照</div><div class="quota-footnote">'+helper.join(' ')+'</div>') : '')+'</div>';
       }
-      const sortedWindows = windows.slice().sort((a,b) => Number(a.percent || 0) - Number(b.percent || 0));
       const tightKey = sortedWindows.length ? sortedWindows[0].key : '';
       const content = windows.map(item => {
         const total = Math.max(0, Number(item.total || 0));
@@ -524,8 +540,13 @@ const indexHTML = `<!doctype html>
         return '<div class="quota-summary-item'+(item.key === tightKey ? ' tight' : '')+'"><div class="quota-summary-top"><span class="quota-summary-title">'+(item.title || '额度')+'</span><span class="quota-summary-value">'+visual.text+'</span></div><div class="meter"><span style="width:'+percent+'%;background:'+visual.color+'"></span></div><div class="quota-meta-grid">'+meta.join('')+'</div></div>';
       }).join('');
       const summaryMeta = '<div class="quota-meta-grid"><div class="quota-meta-item"><div class="quota-meta-label">可用账号</div><div class="quota-meta-value">'+available+'</div></div><div class="quota-meta-item"><div class="quota-meta-label">已纳入汇总</div><div class="quota-meta-value">'+withQuota+'</div></div>'+(missing > 0 || (summary && summary.has_partial_snapshot) ? '<div class="quota-meta-item subtle"><div class="quota-meta-label">缺失快照提示</div><div class="quota-meta-value">部分账号暂无额度快照</div></div>' : '')+'</div>';
-      return '<div class="card panel-card quota-summary-card"><div class="panel-head"><div><div class="panel-title">汇总剩余额度</div><div class="panel-subtitle">基于最近一次额度快照汇总</div></div></div>'+summaryMeta+'<div class="quota-summary-list">'+content+'</div><div class="quota-footnote">'+helper.join(' ')+'</div></div>';
+      return '<div class="card panel-card quota-summary-card"><div class="panel-head"><div><div class="panel-title">汇总剩余额度</div><div class="panel-subtitle">基于最近一次额度快照汇总</div></div>'+toggle+'</div>'+compact+(quotaSummaryExpanded ? (summaryMeta+'<div class="quota-summary-list">'+content+'</div><div class="quota-footnote">'+helper.join(' ')+'</div>') : '')+'</div>';
     }
+    function toggleQuotaSummary(){
+      quotaSummaryExpanded = !quotaSummaryExpanded;
+      cards(current);
+    }
+    window.toggleQuotaSummary = toggleQuotaSummary;
     function metricTile(label, value, clsName){
       return '<div class="metric-tile '+(clsName||'')+'"><div class="metric-label">'+label+'</div><div class="metric-value">'+value+'</div></div>';
     }
