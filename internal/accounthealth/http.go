@@ -347,9 +347,9 @@ const indexHTML = `<!doctype html>
     .summary-compact-item { border:1px solid var(--line); border-radius:12px; background:#0d152d; padding:10px 12px; }
     .summary-compact-value { margin-top:6px; font-size:14px; font-weight:800; color:#f8fafc; }
     .summary-compact-value.warn { color:#fcd34d; }
-    .pager { margin-top:10px; }
     @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .overview-layout { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(3,minmax(0,1fr)); } }
     @media (max-width: 980px) { .quota-summary-card { grid-column: span 1; } }
+    .pager { margin-top:10px; }
     @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid, .summary-compact { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } .pager { flex-direction:column; align-items:stretch; } }
   </style>
 </head>
@@ -471,9 +471,9 @@ const indexHTML = `<!doctype html>
     }
     function overviewCounts(items, summary){
       const total = items.length;
-      const blocked = items.filter(x => overviewStateKind(x) === 'blocked').length;
-      const quota = items.filter(x => overviewStateKind(x) === 'quota').length;
-      const disabled = items.filter(x => x.disabled && overviewStateKind(x) !== 'blocked' && overviewStateKind(x) !== 'quota').length;
+      const disabled = items.filter(x => x.disabled).length;
+      const blocked = items.filter(x => !x.disabled && overviewStateKind(x) === 'blocked').length;
+      const quota = items.filter(x => !x.disabled && overviewStateKind(x) === 'quota').length;
       const availableFromSummary = Number(summary && summary.available_accounts || 0);
       const active = availableFromSummary > 0 ? availableFromSummary : items.filter(overviewQuotaEligible).length;
       const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
