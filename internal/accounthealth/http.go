@@ -349,8 +349,7 @@ const indexHTML = `<!doctype html>
     .summary-compact-value.warn { color:#fcd34d; }
     @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .overview-layout { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(3,minmax(0,1fr)); } }
     @media (max-width: 980px) { .quota-summary-card { grid-column: span 1; } }
-    .pager { margin-top:10px; }
-    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid, .summary-compact { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } .pager { flex-direction:column; align-items:stretch; } }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid, .summary-compact { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } }
   </style>
 </head>
 <body>
@@ -415,13 +414,6 @@ const indexHTML = `<!doctype html>
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <div class="toolbar pager hidden" id="pagerBar">
-      <div class="toolbar-group" id="pagerMeta"></div>
-      <div class="toolbar-group">
-        <button id="prevPage" class="ghost">上一页</button>
-        <button id="nextPage" class="ghost">下一页</button>
-      </div>
-    </div>
   </div>
   <script>
     const el = id => document.getElementById(id);
@@ -429,13 +421,11 @@ const indexHTML = `<!doctype html>
     let currentReport = {};
     let selected = new Set();
     let quotaSummaryExpanded = false;
-    let currentPage = 1;
     let currentFiltered = [];
     let authToken = localStorage.getItem('account-health-token') || '';
     let bootstrapInitialized = true;
     let recentlyUpdated = new Set();
-    const LARGE_LIST_THRESHOLD = 40;
-    const LARGE_LIST_PAGE_SIZE = 30;
+    const RENDER_BATCH_SIZE = 60;
     function fmtTime(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d.getTime()) || d.getFullYear() <= 1) return '-'; return d.toLocaleString(); }
     function cls(s){ s=(s||'').toLowerCase(); if(['active','ok','recovered'].includes(s)) return 'active'; if(['quota'].includes(s)) return 'quota'; if(['blocked'].includes(s)) return 'blocked'; if(['cooling'].includes(s)) return 'cooling'; if(['unprobed'].includes(s)) return 'unprobed'; if(['disabled','error'].includes(s)) return s; return 'cooling'; }
     function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常/不可用',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
@@ -672,31 +662,46 @@ const indexHTML = `<!doctype html>
       const kw = el('keyword').value.trim().toLowerCase();
       return (items || []).filter(x => !kw || String(x.__search || '').includes(kw));
     }
-    function pageSizeFor(total){
-      return total > LARGE_LIST_THRESHOLD ? LARGE_LIST_PAGE_SIZE : Math.max(total, LARGE_LIST_PAGE_SIZE);
+    function renderRow(x){
+      const checked = selected.has(x.file_name) ? 'checked' : '';
+      const rowClass = recentlyUpdated.has(x.file_name) ? ' class="flash-updated"' : '';
+      const provider = (x.provider || '').toLowerCase();
+      const accountType = (x.provider || '-').toUpperCase();
+      const switchState = x.disabled ? '停用' : '启用';
+      const switchClass = x.disabled ? 'switch-disabled' : 'switch-enabled';
+      const name = '<div class="pill-row"><span class="pill provider-pill provider-'+provider+'">'+accountType+'</span><span class="pill switch-pill '+switchClass+'">'+switchState+'</span></div><strong>'+ (x.email || x.display_name || x.file_name || '-') +'</strong>';
+      const success = Math.max(0, (x.proxy_requests||0) - (x.proxy_failures||0));
+      const usageParts = ['请求: '+(x.proxy_requests||0), '<span class="stat-good">成功: '+success+'</span> / <span class="stat-bad">失败: '+(x.proxy_failures||0)+'</span>', 'Tokens: '+(x.proxy_tokens||0)];
+      if(fmtTime(x.proxy_last_used_at) !== '-') usageParts.push('<span class="small">最后使用: '+fmtTime(x.proxy_last_used_at)+'</span>');
+      const usage = usageParts.join('<br>');
+      const kind = stateKind(x);
+      const stateParts = [tag(kind)];
+      const renderedQuotaBoxes = quotaBoxes(x);
+      if(renderedQuotaBoxes) stateParts.push(renderedQuotaBoxes);
+      const pills = [];
+      if((x.plan_type||'').trim()) pills.push('<span class="pill">'+x.plan_type+'</span>');
+      if(pills.length) stateParts.push('<div class="pill-row">'+pills.join('')+'</div>');
+      const state = stateParts.join('<br>');
+      const actions = '<div class="action-row">'+
+        '<button class="ghost" onclick="runAction(\''+x.file_name+'\',\'enable\')">启用</button>'+
+        '<button class="warn" onclick="runAction(\''+x.file_name+'\',\'disable\')">停用</button>'+
+        '<button class="danger" onclick="runAction(\''+x.file_name+'\',\'delete\')">删除</button>'+
+        '</div>';
+      const importedAt = fmtTime(x.imported_at);
+      return '<tr'+rowClass+'><td><input type="checkbox" data-file="'+x.file_name+'" '+checked+' onchange="toggleOne(this)"></td><td>'+name+'</td><td>'+state+'</td><td>'+usage+'</td><td>'+(importedAt === '-' ? '<span class="small">-</span>' : importedAt)+'</td><td>'+actions+'</td></tr>';
     }
-    function pagedItems(filtered){
-      const total = filtered.length;
-      const pageSize = pageSizeFor(total);
-      const totalPages = Math.max(1, Math.ceil(total / pageSize));
-      currentPage = Math.min(Math.max(1, currentPage), totalPages);
-      const startIndex = (currentPage - 1) * pageSize;
-      return {
-        items: filtered.slice(startIndex, startIndex + pageSize),
-        total,
-        pageSize,
-        totalPages,
-        start: total === 0 ? 0 : startIndex + 1,
-        end: Math.min(total, startIndex + pageSize)
-      };
-    }
-    function renderPager(meta){
-      const show = meta.total > meta.pageSize;
-      el('pagerBar').classList.toggle('hidden', !show);
-      if(!show) return;
-      el('pagerMeta').innerHTML = '<span class="small">当前显示 ' + meta.start + '-' + meta.end + ' / ' + meta.total + '</span><span class="small">第 ' + currentPage + ' / ' + meta.totalPages + ' 页</span>';
-      el('prevPage').disabled = currentPage <= 1;
-      el('nextPage').disabled = currentPage >= meta.totalPages;
+    function renderRowsBatched(items){
+      const tbody = el('rows');
+      tbody.innerHTML = '';
+      let index = 0;
+      function flush(){
+        if(index >= items.length) return;
+        const chunk = items.slice(index, index + RENDER_BATCH_SIZE).map(renderRow).join('');
+        tbody.insertAdjacentHTML('beforeend', chunk);
+        index += RENDER_BATCH_SIZE;
+        if(index < items.length) requestAnimationFrame(flush);
+      }
+      requestAnimationFrame(flush);
     }
     function quotaVisual(value){
       if(value <= 0) return { color:'#64748b', text:'已耗尽' };
@@ -776,36 +781,7 @@ const indexHTML = `<!doctype html>
     function rows(items){
       const filtered = getFilteredItems(items);
       currentFiltered = filtered;
-      const page = pagedItems(filtered);
-      el('rows').innerHTML = page.items.map(x => {
-        const checked = selected.has(x.file_name) ? 'checked' : '';
-        const rowClass = recentlyUpdated.has(x.file_name) ? ' class="flash-updated"' : '';
-        const provider = (x.provider || '').toLowerCase();
-        const accountType = (x.provider || '-').toUpperCase();
-        const switchState = x.disabled ? '停用' : '启用';
-        const switchClass = x.disabled ? 'switch-disabled' : 'switch-enabled';
-        const name = '<div class="pill-row"><span class="pill provider-pill provider-'+provider+'">'+accountType+'</span><span class="pill switch-pill '+switchClass+'">'+switchState+'</span></div><strong>'+ (x.email || x.display_name || x.file_name || '-') +'</strong>';
-        const success = Math.max(0, (x.proxy_requests||0) - (x.proxy_failures||0));
-        const usageParts = ['请求: '+(x.proxy_requests||0), '<span class="stat-good">成功: '+success+'</span> / <span class="stat-bad">失败: '+(x.proxy_failures||0)+'</span>', 'Tokens: '+(x.proxy_tokens||0)];
-        if(fmtTime(x.proxy_last_used_at) !== '-') usageParts.push('<span class="small">最后使用: '+fmtTime(x.proxy_last_used_at)+'</span>');
-        const usage = usageParts.join('<br>');
-        const kind = stateKind(x);
-        const stateParts = [tag(kind)];
-        const renderedQuotaBoxes = quotaBoxes(x);
-        if(renderedQuotaBoxes) stateParts.push(renderedQuotaBoxes);
-        const pills = [];
-        if((x.plan_type||'').trim()) pills.push('<span class="pill">'+x.plan_type+'</span>');
-        if(pills.length) stateParts.push('<div class="pill-row">'+pills.join('')+'</div>');
-        const state = stateParts.join('<br>');
-        const actions = '<div class="action-row">'+
-          '<button class="ghost" onclick="runAction(\''+x.file_name+'\',\'enable\')">启用</button>'+
-          '<button class="warn" onclick="runAction(\''+x.file_name+'\',\'disable\')">停用</button>'+
-          '<button class="danger" onclick="runAction(\''+x.file_name+'\',\'delete\')">删除</button>'+
-          '</div>';
-        const importedAt = fmtTime(x.imported_at);
-        return '<tr'+rowClass+'><td><input type="checkbox" data-file="'+x.file_name+'" '+checked+' onchange="toggleOne(this)"></td><td>'+name+'</td><td>'+state+'</td><td>'+usage+'</td><td>'+(importedAt === '-' ? '<span class="small">-</span>' : importedAt)+'</td><td>'+actions+'</td></tr>';
-      }).join('');
-      renderPager(page);
+      renderRowsBatched(filtered);
       updateSelectionMeta(filtered);
     }
     function toggleOne(input){
@@ -879,7 +855,6 @@ const indexHTML = `<!doctype html>
         const report = data.report || {};
         currentReport = report;
         current = prepareItems(report.auths || []);
-        currentPage = 1;
         showApp(true);
         const actionText = run ? '活检完成' : '快照已刷新';
         el('meta').textContent = actionText + ' | 最近运行: ' + fmtTime(data.last_run_at || report.generated_at) + (data.last_error ? ' | 错误: ' + data.last_error : '');
@@ -928,7 +903,7 @@ const indexHTML = `<!doctype html>
     el('refresh').onclick = () => load(false);
     el('probeNow').onclick = () => load(true);
     el('changePassword').onclick = () => changePassword();
-    el('keyword').oninput = () => { currentPage = 1; rows(current); };
+    el('keyword').oninput = () => { rows(current); };
     el('checkAll').onchange = e => {
       const filtered = currentFiltered.length ? currentFiltered : getFilteredItems(current);
       if(e.target.checked) filtered.forEach(x => selected.add(x.file_name));
@@ -940,8 +915,6 @@ const indexHTML = `<!doctype html>
     el('pickActive').onclick = () => selectBy(x => stateKind(x) === 'active');
     el('pickDisabled').onclick = () => selectBy(x => x.disabled);
     el('clearSelection').onclick = () => { selected.clear(); rows(current); };
-    el('prevPage').onclick = () => { if(currentPage > 1){ currentPage--; rows(current); } };
-    el('nextPage').onclick = () => { currentPage++; rows(current); };
     el('batchEnable').onclick = () => runBatchAction('enable', Array.from(selected));
     el('batchDisable').onclick = () => runBatchAction('disable', Array.from(selected));
     el('batchDelete').onclick = () => runBatchAction('delete', Array.from(selected));
