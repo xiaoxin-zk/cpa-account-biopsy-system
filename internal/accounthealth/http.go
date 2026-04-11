@@ -683,6 +683,9 @@ const indexHTML = `<!doctype html>
     }
     function quotaBoxes(x){
       const kind = stateKind(x);
+      if(kind === 'blocked') {
+	        return quotaReasonBox('401封禁，未返回额度');
+      }
       if(Array.isArray(x.quota_items) && x.quota_items.length > 0){
         const relevant = x.quota_items.filter(item => item && ((item.percent_known === true) || !!(item.reset_at && String(item.reset_at).trim()) || item.stale === true || !!(item.title && String(item.title).trim())));
         const rendered = relevant.map(item => quotaItemBox(item, { neutral:!(item.percent_known === true || !!(item.reset_at && String(item.reset_at).trim())), exhausted:((item.percent_known === true && Number(item.percent || 0) <= 0) || (!(item.percent_known === true) && !!item.reset_at && kind === 'quota')) })).filter(Boolean).join('');
@@ -698,9 +701,6 @@ const indexHTML = `<!doctype html>
       }
       if(kind === 'unprobed') {
 	        return quotaReasonBox('未探测');
-      }
-      if(kind === 'blocked') {
-	        return quotaReasonBox('401封禁，未返回额度');
       }
 	      if(kind === 'error') {
 	        if(x.probe_http_status === 402 || String(x.probe_message || '').includes('deactivated_workspace')) return quotaReasonBox('工作区不可用（402），当前不可正常使用');
