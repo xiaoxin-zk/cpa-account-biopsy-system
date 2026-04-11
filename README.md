@@ -73,6 +73,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biops
 - 如果未发现可用目录，会自动回退到安装目录下的数据目录。
 - Windows 默认安装目录为：`%USERPROFILE%\cpa-account-biopsy-system`
 - Windows 默认账号目录为：`%USERPROFILE%\cpa-account-biopsy-system\data\auths`
+- Windows Docker 部署完成后，默认本机访问地址为：`http://localhost:18317/`
 - 只有高级场景下，才建议手动指定自定义账号目录。
 
 推荐方式：
@@ -137,6 +138,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biops
 - 仅适用于 Git Bash / WSL 终端
 - 不适合作为普通 Windows PowerShell 用户的默认说明
 - 找不到主项目账号目录时，会自动回退到 `%USERPROFILE%\cpa-account-biopsy-system\data\auths`
+- 部署完成后，直接在浏览器打开 `http://localhost:18317/`
 
 #### Windows 自定义目录流程（PowerShell）
 
@@ -275,6 +277,12 @@ sidecar 重启后，在本轮探测尚未执行前，会明确显示“未探测
 curl http://127.0.0.1:18317/healthz
 ```
 
+Windows Docker 默认访问面板：
+
+```text
+http://localhost:18317/
+```
+
 #### 4. 首次访问为什么要求设置密码？
 
 因为安装命令默认不再要求你把 Web 密码写在命令行里。首次打开页面时会进入初始化流程，在浏览器中设置仪表台密码，之后会自动持久化保存。
@@ -372,6 +380,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/xiaoxin-zk/cpa-account-biops
 - If no valid auth directory is found, it falls back to the install-local data directory.
 - Default Windows install directory: `%USERPROFILE%\cpa-account-biopsy-system`
 - Default Windows auth directory: `%USERPROFILE%\cpa-account-biopsy-system\data\auths`
+- Default Windows dashboard address after Docker deployment: `http://localhost:18317/`
 - Manual custom directories are intended only for advanced setups.
 
 Recommended usage:

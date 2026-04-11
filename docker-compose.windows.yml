@@ -1,0 +1,6 @@
+services:
+  cpa-account-biopsy-system:
+    ports:
+      - ${CPA_WEB_PORT:-18317}:18317
+    extra_hosts:
+      - host.docker.internal:host-gateway

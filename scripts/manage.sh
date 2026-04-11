@@ -29,11 +29,27 @@ ENV_FILE="$INSTALL_DIR/.env"
 TEST_MODE="${CPA_TEST_MODE:-0}"
 DEFAULT_AUTH_SUBDIR="data/auths"
 CPA_AUTH_CONTAINER_DIR="${CPA_AUTH_CONTAINER_DIR:-/data/auths}"
+CPA_WEB_PORT="${CPA_WEB_PORT:-18317}"
 
 log() { printf '[%s] %s\n' "$APP_NAME" "$*"; }
 die() { log "$*"; exit 1; }
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+compose_args() {
+  local args=(--env-file "$ENV_FILE" -f docker-compose.yml)
+  if is_windows_platform; then
+    args+=(-f docker-compose.windows.yml)
+  else
+    args+=(-f docker-compose.linux.yml)
+  fi
+  printf '%s\n' "${args[@]}"
+}
+
+run_compose() {
+  mapfile -t _compose_args < <(compose_args)
+  run_cmd docker compose "${_compose_args[@]}" "$@"
+}
 
 run_cmd() {
   if [ "$TEST_MODE" = "1" ]; then
@@ -91,18 +107,21 @@ format_access_addrs() {
   if [ -z "$port" ] || [ "$port" = "$listen_addr" ]; then
     port="18317"
   fi
+  if is_windows_platform && [ -n "${CPA_WEB_PORT:-}" ]; then
+    port="$CPA_WEB_PORT"
+  fi
   local localhost="http://127.0.0.1:${port}"
   local lan_ip=""
   local public_ip=""
 
   if has_cmd ip; then
-    lan_ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -n 1)"
+    lan_ip="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)"
   fi
   if [ -z "$lan_ip" ] && has_cmd hostname; then
     lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}' | head -n 1)"
   fi
   if [ -z "$lan_ip" ] && has_cmd ifconfig; then
-    lan_ip="$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')"
+    lan_ip="$(ifconfig 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | awk '$1 != "127.0.0.1" {print; exit}')"
   fi
 
   if [ "$TEST_MODE" = "1" ]; then
@@ -449,6 +468,18 @@ validate_host_inputs() {
   [ -d "$CPA_AUTH_DIR" ] || die "auths 目录不存在: $CPA_AUTH_DIR"
 }
 
+normalize_management_url() {
+  if ! is_windows_platform; then
+    return 0
+  fi
+  case "${CPA_MANAGEMENT_URL:-}" in
+    http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+      CPA_MANAGEMENT_URL="$(printf '%s' "$CPA_MANAGEMENT_URL" | sed -E 's#(https?://)(127\.0\.0\.1|localhost)#\1host.docker.internal#')"
+      log "Windows Docker 下已将管理地址调整为容器可访问地址: $CPA_MANAGEMENT_URL"
+      ;;
+  esac
+}
+
 count_auth_files() {
   local dir="$1"
   find "$dir" -maxdepth 1 -type f -name '*.json' ! -name '.account-health-*' 2>/dev/null | wc -l | tr -d ' '
@@ -532,9 +563,11 @@ prepare_config() {
   resolve_auth_dir
   prompt_if_empty CPA_MANAGEMENT_URL "未自动获取到 CLIProxyAPI 管理地址，请输入管理地址（例如 http://127.0.0.1:8317）"
   prompt_if_empty CPA_MANAGEMENT_KEY "未自动获取到 CLIProxyAPI 管理密码，请输入你的 CLIProxyAPI 管理密码"
+  normalize_management_url
 
   upsert_env CPA_AUTH_DIR "${CPA_AUTH_DIR:-}"
   upsert_env CPA_AUTH_CONTAINER_DIR "${CPA_AUTH_CONTAINER_DIR:-/data/auths}"
+  upsert_env CPA_WEB_PORT "${CPA_WEB_PORT:-18317}"
   upsert_env CPA_MANAGEMENT_URL "${CPA_MANAGEMENT_URL:-}"
   upsert_env CPA_MANAGEMENT_KEY "${CPA_MANAGEMENT_KEY:-}"
   upsert_env CPA_LISTEN_ADDR "${CPA_LISTEN_ADDR:-:18317}"
@@ -548,7 +581,7 @@ install_or_update() {
   prepare_config
   validate_host_inputs
   cd "$INSTALL_DIR"
-  run_cmd docker compose --env-file "$ENV_FILE" up -d --build
+  run_compose up -d --build
   run_post_install_checks
   local listen_addr="${CPA_LISTEN_ADDR:-:18317}"
   log "完成"
@@ -559,7 +592,7 @@ install_or_update() {
 restart_service() {
   [ -d "$INSTALL_DIR" ] || die "尚未安装，无法重启"
   cd "$INSTALL_DIR"
-  run_cmd docker compose --env-file "$ENV_FILE" restart
+  run_compose restart
   log "已重启 sidecar 服务"
 }
 
@@ -574,7 +607,7 @@ show_status() {
   log "安装目录: $INSTALL_DIR"
   log "$(format_access_addrs "${CPA_LISTEN_ADDR:-:18317}")"
   if has_cmd docker; then
-    (cd "$INSTALL_DIR" && docker compose --env-file "$ENV_FILE" ps) || true
+    mapfile -t _compose_args < <(compose_args); (cd "$INSTALL_DIR" && docker compose "${_compose_args[@]}" ps) || true
   else
     log "docker 命令不可用，无法显示容器状态"
   fi
@@ -591,7 +624,7 @@ uninstall_service() {
     esac
   fi
   cd "$INSTALL_DIR"
-  run_cmd docker compose --env-file "$ENV_FILE" down
+  run_compose down
   cd /
   rm -rf "$INSTALL_DIR"
   log "卸载完成，不影响主项目 CLIProxyAPI"

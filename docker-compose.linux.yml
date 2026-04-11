@@ -1,0 +1,3 @@
+services:
+  cpa-account-biopsy-system:
+    network_mode: host
