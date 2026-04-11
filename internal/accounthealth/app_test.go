@@ -262,6 +262,33 @@ func TestClassifyProbeErrorUsageLimitReached(t *testing.T) {
 	}
 }
 
+func TestClassifyProbeErrorTreatsExpiredTokenAsBlocked(t *testing.T) {
+	result := classifyProbeError(testError(`额度获取失败：401 Provided authentication token is expired. Please try signing in again.`))
+	if result.Status != "blocked" {
+		t.Fatalf("expected blocked status, got %q", result.Status)
+	}
+	if result.HTTPStatus != http.StatusUnauthorized {
+		t.Fatalf("expected http 401, got %d", result.HTTPStatus)
+	}
+}
+
+func TestUnauthorizedProbeMessageKeywords(t *testing.T) {
+	cases := []string{
+		`Provided authentication token is expired. Please try signing in again.`,
+		`token expired`,
+		`please sign in again`,
+		`401 unauthorized`,
+	}
+	for _, input := range cases {
+		if !isUnauthorizedProbeMessage(input) {
+			t.Fatalf("expected unauthorized message match for %q", input)
+		}
+	}
+	if isUnauthorizedProbeMessage(`temporary upstream decode failure`) {
+		t.Fatal("did not expect generic error to match unauthorized probe message")
+	}
+}
+
 type testError string
 
 func (e testError) Error() string { return string(e) }

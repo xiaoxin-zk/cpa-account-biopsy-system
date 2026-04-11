@@ -356,7 +356,7 @@ const indexHTML = `<!doctype html>
   <div class="wrap login" id="loginBox">
     <div class="card">
       <div class="title">CPA账号活检系统</div>
-      <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.1-bate</span></div>
+      <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.2-bate</span></div>
       <div class="muted" id="loginDesc" style="margin:10px 0 16px;">请输入活检页面口令。</div>
       <div class="bar">
         <input id="token" type="password" placeholder="请输入页面口令">
@@ -371,7 +371,7 @@ const indexHTML = `<!doctype html>
     <div class="top">
       <div>
         <div class="title">CPA账号活检系统</div>
-        <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.1-bate</span></div>
+        <div class="brand-meta"><span>开发者 Xiaoxin</span><span>版本 0.2-bate</span></div>
         <div class="muted" id="meta">正在加载...</div>
         <div class="summary-box hidden" id="probeSummary"></div>
       </div>

@@ -1049,8 +1049,9 @@ func (a *App) probeCodexViaManagementAPICall(ctx context.Context, file authFile)
 		applyUsageLimitDetails(&result)
 	}
 	switch {
-	case wrapper.StatusCode == http.StatusUnauthorized:
+	case wrapper.StatusCode == http.StatusUnauthorized || isUnauthorizedProbeMessage(wrapper.Body):
 		result.Status = "blocked"
+		result.HTTPStatus = http.StatusUnauthorized
 		if result.Message == "" {
 			result.Message = "upstream returned 401"
 		}
@@ -1094,7 +1095,7 @@ func classifyProbeError(err error) probeResult {
 		if result.HTTPStatus == 0 {
 			result.HTTPStatus = http.StatusTooManyRequests
 		}
-	case result.HTTPStatus == http.StatusUnauthorized || strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized"):
+	case result.HTTPStatus == http.StatusUnauthorized || isUnauthorizedProbeMessage(result.Message):
 		result.Status = "blocked"
 		result.HTTPStatus = http.StatusUnauthorized
 	case result.HTTPStatus == http.StatusTooManyRequests || strings.Contains(lower, "429") || strings.Contains(lower, "quota") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "capacity"):
@@ -1106,6 +1107,32 @@ func classifyProbeError(err error) probeResult {
 		result.Status = "error"
 	}
 	return result
+}
+
+func isUnauthorizedProbeMessage(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") {
+		return true
+	}
+	if strings.Contains(lower, "provided authentication token is expired") {
+		return true
+	}
+	if strings.Contains(lower, "authentication token is expired") {
+		return true
+	}
+	if strings.Contains(lower, "token expired") || strings.Contains(lower, "token is expired") {
+		return true
+	}
+	if strings.Contains(lower, "sign in again") || strings.Contains(lower, "signing in again") {
+		return true
+	}
+	if strings.Contains(lower, "try signing in again") || strings.Contains(lower, "try sign in again") {
+		return true
+	}
+	return false
 }
 
 func applyUsageLimitDetails(result *probeResult) {
