@@ -461,14 +461,14 @@ const indexHTML = `<!doctype html>
     }
     function overviewCounts(items, summary){
       const total = items.length;
-      const disabled = items.filter(x => x.disabled).length;
-      const blocked = items.filter(x => !x.disabled && overviewStateKind(x) === 'blocked').length;
-      const quota = items.filter(x => !x.disabled && overviewStateKind(x) === 'quota').length;
+      const blocked = items.filter(x => overviewStateKind(x) === 'blocked').length;
+      const quota = items.filter(x => overviewStateKind(x) === 'quota').length;
+      const disabled = items.filter(x => overviewStateKind(x) === 'disabled').length;
       const availableFromSummary = Number(summary && summary.available_accounts || 0);
       const active = availableFromSummary > 0 ? availableFromSummary : items.filter(overviewQuotaEligible).length;
       const requests = items.reduce((sum, x) => sum + (x.proxy_requests || 0), 0);
       const failures = items.reduce((sum, x) => sum + (x.proxy_failures || 0), 0);
-      return { total, active, blocked, quota, disabled, requests, failures, abnormal: total - active };
+      return { total, active, blocked, quota, disabled, requests, failures, abnormal: blocked + quota + disabled };
     }
     function meterInfo(x){
       const kind = stateKind(x);
