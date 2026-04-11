@@ -1,7 +1,7 @@
 # CPA Account Biopsy System
 
 Developer: Xiaoxin  
-Version: 0.1-bate
+Version: 0.2-bate
 
 ## 中文说明
 
@@ -48,7 +48,7 @@ CPA Account Biopsy System 是一个独立部署的账号活检 sidecar，专门�
 - 页面主标题：`CPA账号活检系统`
 - 页面显著位置展示：
   - `开发者 Xiaoxin`
-  - `版本 0.1-bate`
+  - `版本 0.2-bate`
 
 ### 依赖条件
 
@@ -355,7 +355,7 @@ If you are looking for a first contribution, docs, tests, issue reproduction, an
 - Main title: `CPA账号活检系统`
 - Visible credits:
   - `开发者 Xiaoxin`
-  - `版本 0.1-bate`
+  - `版本 0.2-bate`
 
 ### Requirements
 
@@ -591,4 +591,4 @@ This repository currently includes an `MIT` license file. Please read [`LICENSE`
 ---
 
 Developer: Xiaoxin  
-Version: 0.1-bate
+Version: 0.2-bate

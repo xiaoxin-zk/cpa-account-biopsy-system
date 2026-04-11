@@ -347,9 +347,10 @@ const indexHTML = `<!doctype html>
     .summary-compact-item { border:1px solid var(--line); border-radius:12px; background:#0d152d; padding:10px 12px; }
     .summary-compact-value { margin-top:6px; font-size:14px; font-weight:800; color:#f8fafc; }
     .summary-compact-value.warn { color:#fcd34d; }
+    .pager { margin-top:10px; }
     @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .overview-layout { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(3,minmax(0,1fr)); } }
     @media (max-width: 980px) { .quota-summary-card { grid-column: span 1; } }
-    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid, .summary-compact { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .overview-main { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-secondary, .quota-meta-grid, .summary-compact { grid-template-columns: 1fr; } .wrap { padding: 14px; } .title { font-size:22px; } .metric-value { font-size:20px; } .quota-summary-value { font-size:16px; } .pager { flex-direction:column; align-items:stretch; } }
   </style>
 </head>
 <body>
@@ -414,6 +415,13 @@ const indexHTML = `<!doctype html>
         <tbody id="rows"></tbody>
       </table>
     </div>
+    <div class="toolbar pager hidden" id="pagerBar">
+      <div class="toolbar-group" id="pagerMeta"></div>
+      <div class="toolbar-group">
+        <button id="prevPage" class="ghost">上一页</button>
+        <button id="nextPage" class="ghost">下一页</button>
+      </div>
+    </div>
   </div>
   <script>
     const el = id => document.getElementById(id);
@@ -421,9 +429,13 @@ const indexHTML = `<!doctype html>
     let currentReport = {};
     let selected = new Set();
     let quotaSummaryExpanded = false;
+    let currentPage = 1;
+    let currentFiltered = [];
     let authToken = localStorage.getItem('account-health-token') || '';
     let bootstrapInitialized = true;
     let recentlyUpdated = new Set();
+    const LARGE_LIST_THRESHOLD = 40;
+    const LARGE_LIST_PAGE_SIZE = 30;
     function fmtTime(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d.getTime()) || d.getFullYear() <= 1) return '-'; return d.toLocaleString(); }
     function cls(s){ s=(s||'').toLowerCase(); if(['active','ok','recovered'].includes(s)) return 'active'; if(['quota'].includes(s)) return 'quota'; if(['blocked'].includes(s)) return 'blocked'; if(['cooling'].includes(s)) return 'cooling'; if(['unprobed'].includes(s)) return 'unprobed'; if(['disabled','error'].includes(s)) return s; return 'cooling'; }
     function tag(s){ s=s||'unknown'; const map={active:'正常',ok:'正常',recovered:'已恢复',quota:'额度/限流',blocked:'401封禁',cooling:'冷却中',unprobed:'未探测',disabled:'已停用',error:'异常/不可用',unknown:'未知'}; return '<span class="tag '+cls(s)+'">'+(map[s]||s)+'</span>'; }
@@ -636,6 +648,56 @@ const indexHTML = `<!doctype html>
       el('selectionMeta').textContent = '已选择 ' + selected.size + ' 个账号';
       el('checkAll').checked = all.length > 0 && all.every(x => selected.has(x.file_name));
     }
+    function buildSearchText(item){
+      if(!item) return '';
+      return [
+        item.file_name,
+        item.email,
+        item.display_name,
+        item.provider,
+        item.plan_type,
+        item.effective_state,
+        item.probe_status,
+        item.managed_reason,
+        item.probe_message
+      ].join(' ').toLowerCase();
+    }
+    function prepareItems(items){
+      return (items || []).map(item => {
+        item.__search = buildSearchText(item);
+        return item;
+      });
+    }
+    function getFilteredItems(items){
+      const kw = el('keyword').value.trim().toLowerCase();
+      return (items || []).filter(x => !kw || String(x.__search || '').includes(kw));
+    }
+    function pageSizeFor(total){
+      return total > LARGE_LIST_THRESHOLD ? LARGE_LIST_PAGE_SIZE : Math.max(total, LARGE_LIST_PAGE_SIZE);
+    }
+    function pagedItems(filtered){
+      const total = filtered.length;
+      const pageSize = pageSizeFor(total);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      currentPage = Math.min(Math.max(1, currentPage), totalPages);
+      const startIndex = (currentPage - 1) * pageSize;
+      return {
+        items: filtered.slice(startIndex, startIndex + pageSize),
+        total,
+        pageSize,
+        totalPages,
+        start: total === 0 ? 0 : startIndex + 1,
+        end: Math.min(total, startIndex + pageSize)
+      };
+    }
+    function renderPager(meta){
+      const show = meta.total > meta.pageSize;
+      el('pagerBar').classList.toggle('hidden', !show);
+      if(!show) return;
+      el('pagerMeta').innerHTML = '<span class="small">当前显示 ' + meta.start + '-' + meta.end + ' / ' + meta.total + '</span><span class="small">第 ' + currentPage + ' / ' + meta.totalPages + ' 页</span>';
+      el('prevPage').disabled = currentPage <= 1;
+      el('nextPage').disabled = currentPage >= meta.totalPages;
+    }
     function quotaVisual(value){
       if(value <= 0) return { color:'#64748b', text:'已耗尽' };
       if(value <= 33) return { color:'#ef4444', text:'剩余 ' + value + '%' };
@@ -712,9 +774,10 @@ const indexHTML = `<!doctype html>
 	      return quotaReasonBox('无额度数据');
     }
     function rows(items){
-      const kw = el('keyword').value.trim().toLowerCase();
-      const filtered = items.filter(x => !kw || JSON.stringify(x).toLowerCase().includes(kw));
-      el('rows').innerHTML = filtered.map(x => {
+      const filtered = getFilteredItems(items);
+      currentFiltered = filtered;
+      const page = pagedItems(filtered);
+      el('rows').innerHTML = page.items.map(x => {
         const checked = selected.has(x.file_name) ? 'checked' : '';
         const rowClass = recentlyUpdated.has(x.file_name) ? ' class="flash-updated"' : '';
         const provider = (x.provider || '').toLowerCase();
@@ -742,6 +805,7 @@ const indexHTML = `<!doctype html>
         const importedAt = fmtTime(x.imported_at);
         return '<tr'+rowClass+'><td><input type="checkbox" data-file="'+x.file_name+'" '+checked+' onchange="toggleOne(this)"></td><td>'+name+'</td><td>'+state+'</td><td>'+usage+'</td><td>'+(importedAt === '-' ? '<span class="small">-</span>' : importedAt)+'</td><td>'+actions+'</td></tr>';
       }).join('');
+      renderPager(page);
       updateSelectionMeta(filtered);
     }
     function toggleOne(input){
@@ -769,7 +833,7 @@ const indexHTML = `<!doctype html>
       if(!res.ok){ alert(data.error || '操作失败'); return; }
       files.forEach(file => selected.delete(file));
       currentReport = data.report || currentReport;
-      current = (data.report && data.report.auths) || current;
+      current = prepareItems((data.report && data.report.auths) || current);
       cards(current); rows(current);
     }
     window.runAction = runAction;
@@ -814,7 +878,8 @@ const indexHTML = `<!doctype html>
         }
         const report = data.report || {};
         currentReport = report;
-        current = report.auths || [];
+        current = prepareItems(report.auths || []);
+        currentPage = 1;
         showApp(true);
         const actionText = run ? '活检完成' : '快照已刷新';
         el('meta').textContent = actionText + ' | 最近运行: ' + fmtTime(data.last_run_at || report.generated_at) + (data.last_error ? ' | 错误: ' + data.last_error : '');
@@ -863,10 +928,9 @@ const indexHTML = `<!doctype html>
     el('refresh').onclick = () => load(false);
     el('probeNow').onclick = () => load(true);
     el('changePassword').onclick = () => changePassword();
-    el('keyword').oninput = () => rows(current);
+    el('keyword').oninput = () => { currentPage = 1; rows(current); };
     el('checkAll').onchange = e => {
-      const kw = el('keyword').value.trim().toLowerCase();
-      const filtered = current.filter(x => !kw || JSON.stringify(x).toLowerCase().includes(kw));
+      const filtered = currentFiltered.length ? currentFiltered : getFilteredItems(current);
       if(e.target.checked) filtered.forEach(x => selected.add(x.file_name));
       else filtered.forEach(x => selected.delete(x.file_name));
       rows(current);
@@ -876,6 +940,8 @@ const indexHTML = `<!doctype html>
     el('pickActive').onclick = () => selectBy(x => stateKind(x) === 'active');
     el('pickDisabled').onclick = () => selectBy(x => x.disabled);
     el('clearSelection').onclick = () => { selected.clear(); rows(current); };
+    el('prevPage').onclick = () => { if(currentPage > 1){ currentPage--; rows(current); } };
+    el('nextPage').onclick = () => { currentPage++; rows(current); };
     el('batchEnable').onclick = () => runBatchAction('enable', Array.from(selected));
     el('batchDisable').onclick = () => runBatchAction('disable', Array.from(selected));
     el('batchDelete').onclick = () => runBatchAction('delete', Array.from(selected));
